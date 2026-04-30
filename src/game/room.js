@@ -15,6 +15,7 @@ import {
   DM_SYSTEM_PROMPT,
   parseDmResponse,
   loadStoredKey,
+  generateAbilities,
 } from "../gemini.js";
 
 // Convert a Firebase messages object (push-key keyed) into a sorted array.
@@ -248,6 +249,40 @@ export function shouldRunDmTurn(room) {
   const cur = room.currentTurn;
   if (cur && room.pendingActions && room.pendingActions[cur]) return true;
   return false;
+}
+
+// Host-only: scan the party for any player whose character has a technique
+// but no abilities yet, and generate a set for them via Gemini. Runs one
+// player at a time to keep API quota predictable.
+export async function generateMissingAbilities({ roomCode, room }) {
+  const apiKey = loadStoredKey();
+  if (!apiKey) return;
+  const players = Object.values(room.players || {});
+  for (const p of players) {
+    const c = p.character;
+    if (!c) continue;
+    const tech = (c.technique || "").trim();
+    const hasAbilities = Array.isArray(c.abilities) && c.abilities.length > 0;
+    if (!tech || tech === "(undeclared technique)" || hasAbilities) continue;
+    try {
+      const abilities = await generateAbilities({
+        apiKey,
+        technique: tech,
+        grade: c.grade,
+      });
+      if (abilities.length) {
+        await updatePlayerCharacter(roomCode, p.uid, { ...c, abilities });
+        await postMessage(roomCode, {
+          author: "system",
+          authorName: "system",
+          type: "system",
+          content: `Generated abilities for ${c.name}: ${abilities.map((a) => a.name).join(", ")}`,
+        });
+      }
+    } catch (err) {
+      console.warn("Ability gen failed for", p.uid, err);
+    }
+  }
 }
 
 // Plant the "Campaign begins." marker so all clients see the opening prompt

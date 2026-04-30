@@ -14,19 +14,20 @@
     <!-- Toast container -->
     <div id="toasts" aria-live="polite"></div>
 
-    <!-- ============ API KEY GATE ============ -->
-    <section id="view-key" class="view active">
+    <!-- ============ API KEY GATE (hosts only) ============ -->
+    <section id="view-key" class="view">
       <div class="card centered">
-        <h1 class="title">Cursed Pact</h1>
-        <p class="subtitle">A multiplayer Jujutsu Kaisen text-adventure RPG, run by Gemini.</p>
+        <h1 class="title">Gemini API key</h1>
+        <p class="subtitle muted">Required only if you're hosting a room.</p>
         <div class="divider"></div>
-        <h2>Gemini API key</h2>
         <p class="muted">
-          Paste your own Google Gemini API key. It is stored only in your browser's localStorage —
-          never sent anywhere except directly to Google's API. <strong>Never share your key.</strong>
+          The host's browser is the only one that calls Gemini — both for the DM
+          and for generating each player's abilities. <strong>If you're joining a
+          friend's room, you don't need a key.</strong>
         </p>
         <p class="muted small">
-          Get a free key at
+          Your key is stored only in this browser's localStorage and is sent
+          directly to Google. Get one free at
           <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
         </p>
         <input id="key-input" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
@@ -34,6 +35,10 @@
           <input type="checkbox" id="key-show" /> Show key
         </label>
         <button id="key-save" class="primary">Save &amp; continue</button>
+        <div class="key-gate-actions">
+          <button id="key-back" class="ghost small">Back to lobby</button>
+          <button id="key-clear" class="ghost small">Forget stored key</button>
+        </div>
         <p id="key-status" class="muted small"></p>
       </div>
     </section>
@@ -63,7 +68,9 @@
         <p class="muted small">
           You are signed in anonymously as
           <code id="lobby-uid">…</code>.
-          <button id="btn-change-key" class="link">Change API key</button>
+          <button id="btn-change-key" class="link">Manage Gemini key</button>
+          <span class="dot-sep">·</span>
+          <span>Joining a room? You don't need a key.</span>
         </p>
       </div>
     </section>

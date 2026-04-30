@@ -7,9 +7,16 @@ import {
   roomExists,
   createRoom,
 } from "../firebase.js";
+import { loadStoredKey } from "../gemini.js";
 
 export function initLobby({ onJoin }) {
   $("#btn-create").addEventListener("click", async () => {
+    if (!loadStoredKey()) {
+      toast("Hosts need a Gemini API key to run the DM.", "warn");
+      window.__app.returnViewAfterKey = "view-lobby";
+      show("view-key");
+      return;
+    }
     initFirebase();
     await authReady();
     const uid = currentUid();
@@ -47,6 +54,7 @@ export function initLobby({ onJoin }) {
   });
 
   $("#btn-change-key").addEventListener("click", () => {
+    window.__app.returnViewAfterKey = "view-lobby";
     show("view-key");
   });
 }

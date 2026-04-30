@@ -5,7 +5,7 @@ import {
   currentUid,
   setPlayerOnline,
 } from "../firebase.js";
-import { messagesArray, submitPlayerAction, runDmTurn, shouldRunDmTurn, triggerCampaignStart } from "../game/room.js";
+import { messagesArray, submitPlayerAction, runDmTurn, shouldRunDmTurn, triggerCampaignStart, generateMissingAbilities } from "../game/room.js";
 
 let unsubscribeRoom = null;
 let lastRoom = null;
@@ -13,6 +13,7 @@ let renderedMessageIds = new Set();
 let roomCode = null;
 let isHost = false;
 let dmRunning = false;
+let abilityGenRunning = false;
 let campaignStartTriggered = false;
 
 export function initGame({ onLeave }) {
@@ -89,6 +90,14 @@ export function joinRoom({ code, host }) {
     }
     lastRoom = room;
     renderRoom(room);
+
+    // Host: backfill abilities for any player who joined without a key.
+    if (isHost && !abilityGenRunning && hasPlayersMissingAbilities(room)) {
+      abilityGenRunning = true;
+      generateMissingAbilities({ roomCode: code, room })
+        .catch((err) => console.warn("Ability backfill failed:", err))
+        .finally(() => { abilityGenRunning = false; });
+    }
 
     // Host orchestrates DM turns once the campaign is started.
     if (isHost && !dmRunning && shouldRunDmTurn(room)) {
@@ -371,4 +380,15 @@ function renderTurnState(room) {
 function truncate(s, n) {
   if (!s) return "";
   return s.length > n ? s.slice(0, n - 1) + "…" : s;
+}
+
+function hasPlayersMissingAbilities(room) {
+  const players = Object.values(room.players || {});
+  return players.some((p) => {
+    const c = p.character;
+    if (!c) return false;
+    const tech = (c.technique || "").trim();
+    if (!tech || tech === "(undeclared technique)") return false;
+    return !Array.isArray(c.abilities) || c.abilities.length === 0;
+  });
 }

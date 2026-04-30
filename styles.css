@@ -362,6 +362,15 @@ button.link {
 }
 .waiting-room button.primary { max-width: 320px; }
 
+.key-gate-actions {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-top: 10px;
+}
+.key-gate-actions button { width: auto; margin: 0; }
+.dot-sep { margin: 0 4px; color: var(--border); }
+
 .party-status { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .status-tag {
   font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;

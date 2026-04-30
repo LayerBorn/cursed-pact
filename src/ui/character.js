@@ -48,26 +48,27 @@ export function initCharacter({ onJoined }) {
       return;
     }
 
-    const apiKey = loadStoredKey();
-    if (!apiKey) {
-      toast("Gemini API key missing — go back and paste it.", "error");
-      return;
-    }
-
     submitBtn.disabled = true;
     const originalLabel = submitBtn.textContent;
-    submitBtn.textContent = "Generating abilities…";
 
+    const apiKey = loadStoredKey();
     let abilities = [];
-    try {
-      abilities = await generateAbilities({
-        apiKey,
-        technique: baseCharacter.technique,
-        grade: baseCharacter.grade,
-      });
-    } catch (err) {
-      console.warn("Ability generation failed:", err);
-      toast(`Couldn't generate abilities (${err.message}). Joining anyway.`, "warn");
+    if (apiKey) {
+      // Host (or any keyed player): generate abilities locally.
+      submitBtn.textContent = "Generating abilities…";
+      try {
+        abilities = await generateAbilities({
+          apiKey,
+          technique: baseCharacter.technique,
+          grade: baseCharacter.grade,
+        });
+      } catch (err) {
+        console.warn("Ability generation failed:", err);
+        toast(`Couldn't generate abilities (${err.message}). Joining anyway — host can regenerate.`, "warn");
+      }
+    } else {
+      // No key — host's browser will generate abilities for us.
+      submitBtn.textContent = "Joining…";
     }
 
     const character = { ...baseCharacter, abilities };
@@ -76,6 +77,8 @@ export function initCharacter({ onJoined }) {
       await addPlayer(roomCode, currentUid(), character);
       if (abilities.length) {
         toast(`Abilities: ${abilities.map((a) => a.name).join(", ")}`, "ok");
+      } else if (!apiKey) {
+        toast("Joined. Abilities will appear once the host generates them.", "ok");
       }
       onJoined(roomCode);
     } catch (err) {

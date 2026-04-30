@@ -8,6 +8,8 @@ import { loadStoredKey, saveKey, clearKey } from "./gemini.js";
 
 window.__app = {
   currentRoomCode: null,
+  // Where to return after the key gate is dismissed (default: lobby).
+  returnViewAfterKey: "view-lobby",
 };
 
 function bootKeyGate() {
@@ -39,7 +41,20 @@ function bootKeyGate() {
     }
     await authReady();
     setLobbyUid(currentUid());
+    show(window.__app.returnViewAfterKey || "view-lobby");
+    window.__app.returnViewAfterKey = "view-lobby";
+  });
+
+  $("#key-back").addEventListener("click", () => {
     show("view-lobby");
+    window.__app.returnViewAfterKey = "view-lobby";
+  });
+
+  $("#key-clear").addEventListener("click", () => {
+    clearKey();
+    input.value = "";
+    status.textContent = "Key cleared from this browser.";
+    toast("API key forgotten.", "ok");
   });
 }
 
@@ -80,18 +95,14 @@ window.addEventListener("DOMContentLoaded", async () => {
   bootCharacter();
   bootGame();
 
-  if (loadStoredKey()) {
-    try {
-      initFirebase();
-      await authReady();
-      setLobbyUid(currentUid());
-      show("view-lobby");
-    } catch (err) {
-      console.error(err);
-      toast(`Firebase init failed: ${err.message}`, "error");
-      show("view-key");
-    }
-  } else {
-    show("view-key");
+  // Always boot to the lobby. The key gate is now on-demand for hosts only.
+  try {
+    initFirebase();
+    await authReady();
+    setLobbyUid(currentUid());
+    show("view-lobby");
+  } catch (err) {
+    console.error(err);
+    toast(`Firebase init failed: ${err.message}`, "error");
   }
 });
