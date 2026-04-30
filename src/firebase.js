@@ -206,4 +206,17 @@ export async function setMap(roomCode, map) {
   await set(roomRef(roomCode, "map"), map || null);
 }
 
+export async function setActionPrompt(roomCode, prompt) {
+  // prompt = { options: [{id, text}], optionMode: "individual"|"group", forUid?: string, openedAt: number }
+  await set(roomRef(roomCode, "actionPrompt"), prompt || null);
+}
+
+export async function castVote(roomCode, uid, optionId) {
+  await set(roomRef(roomCode, `votes/${uid}`), optionId || null);
+}
+
+export async function clearVotes(roomCode) {
+  await set(roomRef(roomCode, "votes"), null);
+}
+
 export { ref, set, get, update };

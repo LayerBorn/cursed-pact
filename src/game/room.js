@@ -7,6 +7,8 @@ import {
   clearPendingActions,
   setObjective,
   setMap,
+  setActionPrompt,
+  clearVotes,
 } from "../firebase.js";
 import { applyMechanicsToCharacter, summarizeChange, rollWithStat, formatRoll } from "./combat.js";
 import {
@@ -55,6 +57,36 @@ export async function submitPlayerAction({ roomCode, uid, name, content, rolls =
     rolls,
     submittedAt: Date.now(),
   });
+  // Submitting an action consumes the current options menu for this player.
+  await setActionPrompt(roomCode, null);
+  await clearVotes(roomCode);
+}
+
+// Tally a group-vote and decide the winner once all online players have voted.
+// Returns the winning option text + count, or null if voting still open.
+export function tallyVotes(room) {
+  const prompt = room?.actionPrompt;
+  if (!prompt || prompt.optionMode !== "group" || !Array.isArray(prompt.options)) return null;
+  const onlineUids = Object.values(room.players || {})
+    .filter((p) => p && p.character)
+    .map((p) => p.uid);
+  const votes = room.votes || {};
+  const eligible = onlineUids;
+  const cast = eligible.filter((u) => votes[u]);
+  if (!eligible.length) return null;
+  if (cast.length < eligible.length) return null; // still waiting
+
+  const counts = {};
+  for (const u of cast) {
+    const v = votes[u];
+    counts[v] = (counts[v] || 0) + 1;
+  }
+  let bestId = null, bestCount = 0;
+  for (const [id, c] of Object.entries(counts)) {
+    if (c > bestCount) { bestId = id; bestCount = c; }
+  }
+  const opt = prompt.options.find((o) => o.id === bestId);
+  return opt ? { option: opt, count: bestCount, total: cast.length } : null;
 }
 
 // Re-fetch the room state (passed via callback so we don't import firebase get
@@ -196,15 +228,54 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
           ? [Math.max(2, Math.min(16, Number(m.size[0]) || 8)), Math.max(2, Math.min(12, Number(m.size[1]) || 5))]
           : [8, 5],
         tokens: Array.isArray(m.tokens)
-          ? m.tokens.slice(0, 30).filter((t) => t && Array.isArray(t.pos) && t.pos.length === 2).map((t) => ({
-              id: String(t.id || "").slice(0, 64),
-              label: String(t.label || "?").slice(0, 24),
-              kind: ["player", "ally", "enemy", "boss", "feature"].includes(t.kind) ? t.kind : "feature",
-              pos: [Math.max(0, Math.min(15, Number(t.pos[0]) || 0)), Math.max(0, Math.min(11, Number(t.pos[1]) || 0))],
-            }))
+          ? m.tokens.slice(0, 30).filter((t) => t && Array.isArray(t.pos) && t.pos.length === 2).map((t) => {
+              const tok = {
+                id: String(t.id || "").slice(0, 64),
+                label: String(t.label || "?").slice(0, 24),
+                kind: ["player", "ally", "enemy", "boss", "feature"].includes(t.kind) ? t.kind : "feature",
+                pos: [Math.max(0, Math.min(15, Number(t.pos[0]) || 0)), Math.max(0, Math.min(11, Number(t.pos[1]) || 0))],
+              };
+              const hp = Number(t.hp);
+              const maxHp = Number(t.maxHp);
+              if (Number.isFinite(hp) && Number.isFinite(maxHp) && maxHp > 0) {
+                tok.hp = Math.max(0, Math.min(9999, Math.round(hp)));
+                tok.maxHp = Math.max(1, Math.min(9999, Math.round(maxHp)));
+              }
+              return tok;
+            })
           : [],
       };
       try { await setMap(roomCode, cleaned); } catch {}
+    }
+
+    // Action prompt + options. Cleared on next DM turn so we don't carry stale buttons.
+    const optionsArr = Array.isArray(mechanics?.options) ? mechanics.options : [];
+    const cleanedOptions = optionsArr
+      .map((o, idx) => {
+        const text = typeof o === "string" ? o : (o && typeof o.text === "string" ? o.text : null);
+        if (!text) return null;
+        return { id: String(o?.id || `opt-${idx}`).slice(0, 16), text: text.slice(0, 100) };
+      })
+      .filter(Boolean)
+      .slice(0, 5);
+    if (cleanedOptions.length) {
+      const optionMode = mechanics?.optionMode === "group" ? "group" : "individual";
+      const forUid = optionMode === "individual" ? (mechanics?.nextTurn || room.currentTurn) : null;
+      try {
+        await setActionPrompt(roomCode, {
+          options: cleanedOptions,
+          optionMode,
+          forUid,
+          openedAt: Date.now(),
+        });
+        await clearVotes(roomCode);
+      } catch {}
+    } else {
+      // No options on this turn — clear any stale prompt.
+      try {
+        await setActionPrompt(roomCode, null);
+        await clearVotes(roomCode);
+      } catch {}
     }
 
     // If a roll is needed, auto-roll and chain the next call.
@@ -231,10 +302,9 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
   await clearPendingActions(roomCode);
 }
 
-// Whether the host should run a DM turn now. Two cases:
-// 1. No DM message has been posted yet AND the host has registered a character
-//    AND there's a "Campaign begins." system message → run opening turn.
-// 2. The current-turn player has submitted a pending action.
+// Whether the host should run a DM turn now.
+//   1. Opening turn: campaign begun + no DM message yet + host registered.
+//   2. Any pending action exists (a player submitted, OR group vote resolved).
 export function shouldRunDmTurn(room) {
   if (!room) return false;
   const msgs = Object.values(room.messages || {});
@@ -244,9 +314,27 @@ export function shouldRunDmTurn(room) {
 
   if (!hasAnyDmMsg && hasCampaignBegan && hostRegistered) return true;
 
-  const cur = room.currentTurn;
-  if (cur && room.pendingActions && room.pendingActions[cur]) return true;
+  const pendings = room.pendingActions || {};
+  if (Object.keys(pendings).length > 0) return true;
   return false;
+}
+
+// Submit the resolved group-vote as a party action so the DM picks it up.
+export async function submitPartyAction({ roomCode, content, count, total }) {
+  const tag = count != null ? ` (${count}/${total})` : "";
+  await postMessage(roomCode, {
+    author: "__party__",
+    authorName: `Party${tag}`,
+    type: "player",
+    content,
+  });
+  await setPendingAction(roomCode, "__party__", {
+    content,
+    rolls: [],
+    submittedAt: Date.now(),
+  });
+  await setActionPrompt(roomCode, null);
+  await clearVotes(roomCode);
 }
 
 // Host-only: scan the party for any player whose character has a technique

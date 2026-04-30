@@ -6,11 +6,22 @@ import {
   setPlayerOnline,
   bumpLastSeen,
   kickPlayer,
+  castVote,
 } from "../firebase.js";
-import { messagesArray, submitPlayerAction, runDmTurn, shouldRunDmTurn, triggerCampaignStart, generateMissingAbilities, regenerateForPlayer } from "../game/room.js";
+import {
+  messagesArray,
+  submitPlayerAction,
+  submitPartyAction,
+  runDmTurn,
+  shouldRunDmTurn,
+  triggerCampaignStart,
+  generateMissingAbilities,
+  regenerateForPlayer,
+  tallyVotes,
+} from "../game/room.js";
 import { findProfanity } from "../util/profanity.js";
 
-const INACTIVE_AFTER_MS = 60 * 1000; // 1 minute of no heartbeat → "inactive"
+const INACTIVE_AFTER_MS = 60 * 1000;
 const HEARTBEAT_MS = 25 * 1000;
 let heartbeatTimer = null;
 let inactivityRefreshTimer = null;
@@ -22,7 +33,7 @@ let roomCode = null;
 let isHost = false;
 let dmRunning = false;
 let abilityGenRunning = false;
-let campaignStartTriggered = false;
+let voteResolveRunning = false;
 
 export function initGame({ onLeave }) {
   $("#btn-leave").addEventListener("click", async () => {
@@ -38,7 +49,6 @@ export function initGame({ onLeave }) {
     await sendAction();
   });
 
-  // Live char counter on the action input.
   const actionInput = $("#action-input");
   const actionCounter = $("#action-counter");
   if (actionInput && actionCounter) {
@@ -65,7 +75,6 @@ export function initGame({ onLeave }) {
     }
   });
 
-  // Hide the now-vestigial dice buttons — auto-roll handles checks.
   const tray = $("#dice-tray");
   if (tray) tray.classList.add("hidden");
   const quickRoll = $("#btn-quick-roll");
@@ -78,19 +87,16 @@ async function sendAction() {
     toast("Type something to do.", "warn");
     return;
   }
-  if (text.length > 500) {
-    toast("Action too long (max 500 chars).", "warn");
-    return;
-  }
-  const profane = findProfanity(text);
-  if (profane) {
-    toast(`Profanity detected — please rephrase.`, "error");
-    return;
-  }
+  if (text.length > 500) { toast("Action too long (max 500 chars).", "warn"); return; }
+  if (findProfanity(text)) { toast(`Profanity detected — please rephrase.`, "error"); return; }
+
   const my = lastRoom?.players?.[currentUid()];
   if (!my) { toast("Not in this room.", "error"); return; }
-  if (lastRoom.currentTurn && lastRoom.currentTurn !== currentUid()) {
-    toast("Not your turn — but I'll send anyway.", "warn");
+
+  // If a group prompt is open, freeform isn't appropriate — they should vote.
+  // We still allow it so the host can override, but warn.
+  if (lastRoom?.actionPrompt?.optionMode === "group") {
+    toast("Group vote in progress — submitting freeform overrides the vote.", "warn");
   }
 
   await submitPlayerAction({
@@ -101,15 +107,34 @@ async function sendAction() {
     rolls: [],
   });
   $("#action-input").value = "";
-  // Reset counter
   const counter = $("#action-counter");
   if (counter) { counter.textContent = "0 / 500"; counter.classList.remove("near-limit"); }
+}
+
+async function submitOption(optionText) {
+  const my = lastRoom?.players?.[currentUid()];
+  if (!my) return;
+  await submitPlayerAction({
+    roomCode,
+    uid: currentUid(),
+    name: my.name,
+    content: optionText,
+    rolls: [],
+  });
+}
+
+async function castVoteFor(optionId) {
+  try {
+    await castVote(roomCode, currentUid(), optionId);
+  } catch (err) {
+    console.error(err);
+    toast(`Vote failed: ${err.message}`, "error");
+  }
 }
 
 export function joinRoom({ code, host }) {
   roomCode = code;
   isHost = host;
-  campaignStartTriggered = false;
   window.__app.currentRoomCode = code;
 
   $("#game-room-code").textContent = code;
@@ -124,7 +149,6 @@ export function joinRoom({ code, host }) {
     lastRoom = room;
     renderRoom(room);
 
-    // Host: backfill abilities for any player who joined without a key.
     if (isHost && !abilityGenRunning && hasPlayersMissingAbilities(room)) {
       abilityGenRunning = true;
       generateMissingAbilities({ roomCode: code, room })
@@ -132,33 +156,53 @@ export function joinRoom({ code, host }) {
         .finally(() => { abilityGenRunning = false; });
     }
 
-    // Host orchestrates DM turns once the campaign is started.
+    // Host: detect resolved group vote, submit as party action.
+    if (isHost && !voteResolveRunning && !dmRunning) {
+      const winner = tallyVotes(room);
+      if (winner) {
+        voteResolveRunning = true;
+        submitPartyAction({
+          roomCode: code,
+          content: winner.option.text,
+          count: winner.count,
+          total: winner.total,
+        })
+          .catch((err) => console.warn("Party action submit failed:", err))
+          .finally(() => { voteResolveRunning = false; });
+      }
+    }
+
     if (isHost && !dmRunning && shouldRunDmTurn(room)) {
       dmRunning = true;
+      $("#dm-thinking").classList.remove("hidden");
       runDmTurn({ roomCode: code, room, hostUid: currentUid() })
         .catch((err) => {
           console.error("DM turn failed:", err);
           toast(`DM turn failed: ${err.message}`, "error");
         })
-        .finally(() => { dmRunning = false; });
+        .finally(() => {
+          dmRunning = false;
+          $("#dm-thinking").classList.add("hidden");
+        });
+    } else if (!isHost) {
+      // Non-hosts show the spinner whenever a pending action exists or the DM
+      // is waiting on the host (heuristic: pendingActions present, no fresh DM
+      // message yet from this prompt).
+      const hasPending = room.pendingActions && Object.keys(room.pendingActions).length > 0;
+      $("#dm-thinking").classList.toggle("hidden", !hasPending);
     }
   });
 
   setPlayerOnline(code, currentUid(), true).catch(() => {});
 
-  // Heartbeat: bump lastSeen periodically while the tab is active.
   if (heartbeatTimer) clearInterval(heartbeatTimer);
   heartbeatTimer = setInterval(() => {
-    if (document.visibilityState !== "visible") return;
-    if (!roomCode) return;
+    if (document.visibilityState !== "visible" || !roomCode) return;
     bumpLastSeen(roomCode, currentUid()).catch(() => {});
   }, HEARTBEAT_MS);
 
-  // Tab regaining focus → bump immediately so others see we're back.
   document.addEventListener("visibilitychange", onVisibilityChange);
 
-  // Re-render party every 15s so the inactivity tag updates as time passes
-  // even without a Firebase change.
   if (inactivityRefreshTimer) clearInterval(inactivityRefreshTimer);
   inactivityRefreshTimer = setInterval(() => {
     if (lastRoom) renderParty(lastRoom);
@@ -180,19 +224,23 @@ function leaveRoom() {
   renderedMessageIds = new Set();
   roomCode = null;
   isHost = false;
-  campaignStartTriggered = false;
   $("#chat-log").innerHTML = "";
   $("#party-list").innerHTML = "";
   $("#action-input").value = "";
   $("#dice-tray").classList.add("hidden");
+  $("#turn-banner").classList.add("hidden");
+  $("#action-prompt").classList.add("hidden");
+  $("#dm-thinking").classList.add("hidden");
 }
 
 function renderRoom(room) {
   renderWaitingRoom(room);
   renderObjective(room);
+  renderTurnBanner(room);
   renderParty(room);
   renderMap(room);
   renderMessages(room);
+  renderActionPrompt(room);
   renderTurnState(room);
 }
 
@@ -211,21 +259,20 @@ function renderWaitingRoom(room) {
   const nonHost = $("#waiting-non-host");
 
   if (hasCampaignMsg) {
-    // Game in progress — hide waiting UI, show chat and action form.
     waitingRoom.classList.add("hidden");
     chatLog.classList.remove("hidden");
     actionForm.classList.remove("hidden");
     return;
   }
 
-  // Pre-game state: show waiting room, hide chat + input.
   waitingRoom.classList.remove("hidden");
   chatLog.classList.add("hidden");
   actionForm.classList.add("hidden");
+  $("#turn-banner").classList.add("hidden");
+  $("#action-prompt").classList.add("hidden");
 
   $("#waiting-room-code").textContent = roomCode || "—";
 
-  // Roster of players already in the lobby.
   const status = $("#waiting-status");
   if (!ready) {
     status.textContent = "No sorcerers yet. Build yours.";
@@ -234,7 +281,6 @@ function renderWaitingRoom(room) {
     status.textContent = `${ready} sorcerer${ready === 1 ? "" : "s"} ready: ${names}`;
   }
 
-  // Host: show start button (disabled until at least one sorcerer is registered).
   if (isHost) {
     startBtn.classList.remove("hidden");
     startBtn.disabled = ready < 1 || !myselfIn;
@@ -245,6 +291,111 @@ function renderWaitingRoom(room) {
   } else {
     startBtn.classList.add("hidden");
     nonHost.classList.remove("hidden");
+  }
+}
+
+function renderTurnBanner(room) {
+  const banner = $("#turn-banner");
+  const msgs = Object.values(room.messages || {});
+  const hasCampaignMsg = msgs.some((m) => m && m.type === "system" && /Campaign begins/i.test(m.content || ""));
+  if (!hasCampaignMsg) { banner.classList.add("hidden"); return; }
+
+  const me = currentUid();
+  const cur = room.currentTurn;
+  const curPlayer = cur ? room.players?.[cur] : null;
+  const curName = curPlayer?.character?.name || curPlayer?.name || null;
+
+  // Group prompt? Show "Party vote" banner regardless of currentTurn.
+  if (room.actionPrompt?.optionMode === "group") {
+    banner.classList.remove("hidden");
+    banner.classList.remove("yours");
+    banner.classList.add("group");
+    $("#turn-label").textContent = "PARTY VOTE";
+    $("#turn-name").textContent = "Choose together";
+    return;
+  }
+
+  if (!cur) { banner.classList.add("hidden"); return; }
+
+  banner.classList.remove("hidden");
+  banner.classList.remove("group");
+  if (cur === me) {
+    banner.classList.add("yours");
+    $("#turn-label").textContent = "YOUR TURN";
+    $("#turn-name").textContent = curName ? `(${curName})` : "";
+  } else {
+    banner.classList.remove("yours");
+    $("#turn-label").textContent = "TURN";
+    $("#turn-name").textContent = curName || "—";
+  }
+}
+
+function renderActionPrompt(room) {
+  const panel = $("#action-prompt");
+  const optionsRoot = $("#action-options");
+  const tally = $("#action-prompt-tally");
+  const modeLabel = $("#action-prompt-mode");
+  const prompt = room.actionPrompt;
+
+  if (!prompt || !Array.isArray(prompt.options) || !prompt.options.length) {
+    panel.classList.add("hidden");
+    optionsRoot.innerHTML = "";
+    return;
+  }
+
+  panel.classList.remove("hidden");
+  const me = currentUid();
+  const isGroup = prompt.optionMode === "group";
+
+  if (isGroup) {
+    modeLabel.textContent = "Party vote — choose one";
+    panel.classList.add("group");
+    panel.classList.remove("individual", "spectator");
+    const onlineUids = Object.keys(room.players || {});
+    const votes = room.votes || {};
+    const cast = onlineUids.filter((u) => votes[u]).length;
+    tally.textContent = `${cast} / ${onlineUids.length} voted`;
+  } else {
+    panel.classList.remove("group", "spectator");
+    panel.classList.add("individual");
+    if (prompt.forUid === me) {
+      modeLabel.textContent = "Choose your action";
+    } else {
+      modeLabel.textContent = `Waiting for ${room.players?.[prompt.forUid]?.character?.name || "player"}…`;
+      panel.classList.add("spectator");
+    }
+    tally.textContent = "";
+  }
+
+  optionsRoot.innerHTML = "";
+  const myVote = (room.votes || {})[me];
+
+  for (const opt of prompt.options) {
+    let count = 0;
+    if (isGroup) {
+      const votes = room.votes || {};
+      count = Object.values(votes).filter((v) => v === opt.id).length;
+    }
+    const btn = el("button", {
+      class: `option-btn ${isGroup && myVote === opt.id ? "voted" : ""}`,
+      type: "button",
+      onclick: async () => {
+        if (isGroup) {
+          await castVoteFor(opt.id);
+        } else {
+          if (prompt.forUid && prompt.forUid !== me) {
+            toast("Not your turn.", "warn");
+            return;
+          }
+          await submitOption(opt.text);
+        }
+      },
+    }, [
+      el("span", { class: "option-text" }, opt.text),
+      isGroup ? el("span", { class: "option-count" }, count > 0 ? String(count) : "") : null,
+    ].filter(Boolean));
+    if (!isGroup && prompt.forUid && prompt.forUid !== me) btn.disabled = true;
+    optionsRoot.appendChild(btn);
   }
 }
 
@@ -260,44 +411,67 @@ function renderMap(room) {
   const [cols, rows] = map.size;
   const me = currentUid();
 
-  // Title
   container.innerHTML = "";
-  const title = el("div", { class: "map-title" }, escapeHtml(map.scene || "Scene"));
-  container.appendChild(title);
+  container.appendChild(el("div", { class: "map-title" }, escapeHtml(map.scene || "Scene")));
 
-  // Grid
   const grid = el("div", {
     class: "map-grid",
     style: `grid-template-columns: repeat(${cols}, 1fr); aspect-ratio: ${cols} / ${rows};`,
   });
-  // Empty cells first.
-  for (let i = 0; i < cols * rows; i++) {
-    grid.appendChild(el("div", { class: "map-cell" }));
-  }
+  for (let i = 0; i < cols * rows; i++) grid.appendChild(el("div", { class: "map-cell" }));
   container.appendChild(grid);
 
-  // Tokens overlay positioned absolutely inside the grid.
   for (const t of map.tokens) {
     const [c, r] = t.pos;
     if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
-    const cellIdx = r * cols + c;
-    const cell = grid.children[cellIdx];
+    const cell = grid.children[r * cols + c];
     if (!cell) continue;
     const isMe = t.kind === "player" && t.id === me;
     const tokenLabel = (t.label || "?").slice(0, 2).toUpperCase();
+
+    // Compute hp/maxHp: enemy/boss tokens have it inline; player tokens read
+    // from the player's character record so we can surface live HP.
+    let hp = null, maxHp = null, hpTitle = "";
+    if (t.kind === "player" || t.kind === "ally") {
+      const player = room.players?.[t.id];
+      const c2 = player?.character;
+      if (c2 && Number.isFinite(c2.maxHp) && c2.maxHp > 0) {
+        hp = c2.hp ?? c2.maxHp;
+        maxHp = c2.maxHp;
+        hpTitle = `${hp} / ${maxHp} HP`;
+      }
+    } else if (Number.isFinite(t.hp) && Number.isFinite(t.maxHp) && t.maxHp > 0) {
+      hp = t.hp;
+      maxHp = t.maxHp;
+      hpTitle = `${hp} / ${maxHp} HP`;
+    }
+
     const tok = el("div", {
       class: `map-token kind-${t.kind || "feature"} ${isMe ? "me" : ""}`,
-      title: t.label || "",
-    }, tokenLabel);
+      title: hpTitle ? `${t.label || ""} — ${hpTitle}` : (t.label || ""),
+    });
+    tok.appendChild(el("span", { class: "map-token-label" }, tokenLabel));
+    if (hp != null && maxHp != null) {
+      const pct = Math.max(0, Math.min(100, Math.round((hp / maxHp) * 100)));
+      const hpBar = el("div", { class: "map-token-hp" }, el("div", { class: "map-token-hp-fill", style: `width:${pct}%` }));
+      tok.appendChild(hpBar);
+    }
     cell.appendChild(tok);
   }
 
-  // Legend
+  // Legend with optional HP next to each non-feature token
   const legend = el("div", { class: "map-legend" });
   for (const t of map.tokens) {
+    let hpTxt = "";
+    if (t.kind === "player" || t.kind === "ally") {
+      const c2 = room.players?.[t.id]?.character;
+      if (c2 && Number.isFinite(c2.maxHp)) hpTxt = ` ${c2.hp ?? "?"}/${c2.maxHp}`;
+    } else if (Number.isFinite(t.hp) && Number.isFinite(t.maxHp)) {
+      hpTxt = ` ${t.hp}/${t.maxHp}`;
+    }
     legend.appendChild(el("div", { class: "map-legend-row" }, [
       el("span", { class: `map-legend-dot kind-${t.kind || "feature"}` }, ""),
-      el("span", { class: "map-legend-label" }, escapeHtml(t.label || "?")),
+      el("span", { class: "map-legend-label" }, escapeHtml(t.label || "?") + hpTxt),
     ]));
   }
   container.appendChild(legend);
@@ -350,13 +524,12 @@ function renderParty(room) {
     });
 
     const nameRow = el("div", { class: "party-name" }, [
-      el("span", {}, [
+      el("span", { class: "party-name-text" }, [
         `${escapeHtml(c.name || p.name || "?")} `,
         el("span", { class: "party-grade" }, escapeHtml(c.grade || "")),
       ]),
     ]);
 
-    // Host action buttons (not for self).
     if (isHost && p.uid !== me) {
       const btnGroup = el("div", { class: "party-host-actions" });
       btnGroup.appendChild(el("button", {
@@ -450,15 +623,14 @@ function renderMessages(room) {
     const node = renderMessageNode(m, me);
     log.appendChild(node);
   }
-  if (appended) {
-    log.scrollTop = log.scrollHeight;
-  }
+  if (appended) log.scrollTop = log.scrollHeight;
 }
 
 function renderMessageNode(m, me) {
   const cls = ["msg", m.type || "system"];
   if (m.type === "player") {
-    cls.push(m.author === me ? "you" : "other");
+    if (m.author === "__party__") cls.push("party");
+    else cls.push(m.author === me ? "you" : "other");
   }
   const wrap = document.createElement("div");
   wrap.className = cls.join(" ");

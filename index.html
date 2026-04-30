@@ -196,11 +196,36 @@
             <p id="waiting-non-host" class="muted small hidden">Waiting for the host to start…</p>
           </div>
 
+          <!-- Big "whose turn" banner -->
+          <div id="turn-banner" class="turn-banner hidden">
+            <div class="turn-banner-inner">
+              <span class="turn-label" id="turn-label">YOUR TURN</span>
+              <span class="turn-name" id="turn-name"></span>
+            </div>
+          </div>
+
           <div id="chat-log" class="chat-log"></div>
+
+          <!-- DM thinking spinner -->
+          <div id="dm-thinking" class="dm-thinking hidden">
+            <div class="dm-thinking-dot"></div>
+            <div class="dm-thinking-dot"></div>
+            <div class="dm-thinking-dot"></div>
+            <span>The DM is thinking…</span>
+          </div>
 
           <div class="dice-tray hidden" id="dice-tray">
             <p class="muted small" id="dice-prompt">The DM asks for a roll.</p>
             <button id="btn-roll" class="primary">Roll d20</button>
+          </div>
+
+          <!-- Action prompt: option buttons / voting tally / freeform fallback -->
+          <div id="action-prompt" class="action-prompt hidden">
+            <div class="action-prompt-header">
+              <span class="action-prompt-mode" id="action-prompt-mode">Choose an action</span>
+              <span class="action-prompt-tally" id="action-prompt-tally"></span>
+            </div>
+            <div id="action-options" class="action-options"></div>
           </div>
 
           <form id="action-form" class="action-form">

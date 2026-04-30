@@ -1,20 +1,29 @@
 /* ─────────────── Cursed Pact / JJK RPG — Theme ─────────────── */
 :root {
-  --bg: #0a0710;
-  --surface: #14101c;
-  --surface2: #1c1628;
-  --surface3: #261e36;
+  --bg: #08060e;
+  --surface: #13101c;
+  --surface2: #1c1729;
+  --surface3: #261f37;
+  --surface-hi: #2e2542;
   --border: #2d2540;
-  --accent: #8a5cff;       /* cursed-energy violet */
+  --border-hi: #3d3358;
+  --accent: #8a5cff;
   --accent2: #b89aff;
+  --accent-deep: #6a3fdc;
   --accent-glow: rgba(138, 92, 255, 0.45);
+  --accent-glow-strong: rgba(138, 92, 255, 0.7);
   --danger: #ff4757;
   --warn: #ffb84d;
   --good: #5ee0a6;
   --text: #ece8f3;
   --muted: #8a82a0;
+  --muted2: #b8b0c8;
   --font-display: 'Cinzel', serif;
   --font-body: 'Inter', system-ui, -apple-system, sans-serif;
+  --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 20px rgba(0, 0, 0, 0.4);
+  --shadow-glow: 0 0 30px var(--accent-glow);
+  --transition: 200ms cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -575,4 +584,262 @@ button.link {
 ::-webkit-scrollbar { width: 8px; height: 8px; }
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--surface3); border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: var(--border); }
+::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+
+/* ──────────────────────────────────────────────────────────────────
+   Big "whose turn" banner
+   ────────────────────────────────────────────────────────────────── */
+.turn-banner {
+  margin-bottom: 10px;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  transition: all var(--transition);
+}
+.turn-banner.hidden { display: none; }
+.turn-banner-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 10px 16px;
+  font-family: var(--font-display);
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+.turn-banner .turn-label {
+  color: var(--muted);
+  text-transform: uppercase;
+}
+.turn-banner .turn-name {
+  color: var(--text);
+  font-weight: 500;
+  text-transform: none;
+  font-family: var(--font-body);
+  letter-spacing: 0;
+}
+.turn-banner.yours {
+  background: linear-gradient(120deg, rgba(138, 92, 255, 0.18), rgba(184, 154, 255, 0.06));
+  border-color: var(--accent);
+  box-shadow: 0 0 24px var(--accent-glow);
+  animation: turn-pulse 2.4s ease-in-out infinite;
+}
+.turn-banner.yours .turn-label {
+  color: var(--accent2);
+  text-shadow: 0 0 8px var(--accent-glow-strong);
+}
+.turn-banner.group {
+  background: linear-gradient(120deg, rgba(255, 184, 77, 0.16), rgba(255, 184, 77, 0.04));
+  border-color: var(--warn);
+}
+.turn-banner.group .turn-label { color: var(--warn); }
+@keyframes turn-pulse {
+  0%, 100% { box-shadow: 0 0 16px var(--accent-glow); }
+  50%      { box-shadow: 0 0 32px var(--accent-glow-strong); }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Action prompt: option buttons + voting
+   ────────────────────────────────────────────────────────────────── */
+.action-prompt {
+  border-top: 1px solid var(--border);
+  padding: 14px;
+  background: linear-gradient(180deg, rgba(138, 92, 255, 0.05), transparent);
+  animation: prompt-in 220ms ease-out;
+}
+.action-prompt.hidden { display: none; }
+.action-prompt-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  margin-bottom: 8px;
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+.action-prompt-mode {
+  color: var(--accent2);
+  font-weight: 600;
+}
+.action-prompt.group .action-prompt-mode { color: var(--warn); }
+.action-prompt.spectator .action-prompt-mode { color: var(--muted); }
+.action-prompt-tally {
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+.action-options {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.option-btn {
+  width: 100%;
+  margin: 0;
+  padding: 10px 14px;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+  text-align: left;
+  font-size: 0.92rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  transition: all var(--transition);
+}
+.option-btn:hover:not(:disabled) {
+  background: var(--surface3);
+  border-color: var(--accent);
+  transform: translateX(2px);
+}
+.option-btn:active:not(:disabled) { transform: translateX(2px) scale(0.98); }
+.option-btn:disabled { opacity: 0.55; cursor: not-allowed; }
+.option-btn.voted {
+  border-color: var(--warn);
+  background: rgba(255, 184, 77, 0.10);
+  box-shadow: inset 0 0 0 1px var(--warn);
+}
+.option-text { flex: 1; line-height: 1.35; }
+.option-count {
+  flex-shrink: 0;
+  min-width: 28px;
+  text-align: center;
+  padding: 2px 8px;
+  background: var(--warn);
+  color: #1a1208;
+  border-radius: 999px;
+  font-weight: 700;
+  font-size: 0.78rem;
+}
+@keyframes prompt-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   DM thinking spinner
+   ────────────────────────────────────────────────────────────────── */
+.dm-thinking {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 16px;
+  background: rgba(138, 92, 255, 0.06);
+  border-top: 1px solid var(--border);
+  font-size: 0.85rem;
+  color: var(--muted2);
+  font-style: italic;
+}
+.dm-thinking.hidden { display: none; }
+.dm-thinking-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: dm-think-bounce 1.2s ease-in-out infinite;
+}
+.dm-thinking-dot:nth-child(2) { animation-delay: 150ms; }
+.dm-thinking-dot:nth-child(3) { animation-delay: 300ms; }
+@keyframes dm-think-bounce {
+  0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+  30%           { opacity: 1; transform: translateY(-3px); }
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Map token HP bars + label refinements
+   ────────────────────────────────────────────────────────────────── */
+.map-token {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  inset: 6%;
+}
+.map-token-label {
+  display: block;
+  line-height: 1;
+  z-index: 1;
+}
+.map-token-hp {
+  position: absolute;
+  bottom: -4px;
+  left: 5%;
+  width: 90%;
+  height: 3px;
+  background: rgba(0, 0, 0, 0.6);
+  border-radius: 999px;
+  overflow: hidden;
+}
+.map-token-hp-fill {
+  height: 100%;
+  background: linear-gradient(90deg, #ff7b8a, #5ee0a6);
+  transition: width 400ms ease-out;
+}
+.map-token.kind-enemy .map-token-hp-fill,
+.map-token.kind-boss  .map-token-hp-fill {
+  background: linear-gradient(90deg, #ff4757, #ff7b8a);
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Polish: smoother transitions, a nicer chat feel, message animation
+   ────────────────────────────────────────────────────────────────── */
+.msg { animation: msg-in 250ms ease-out; }
+@keyframes msg-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.msg.dm {
+  border-left-width: 4px;
+}
+.msg.player.party {
+  background: linear-gradient(180deg, rgba(255, 184, 77, 0.10), rgba(255, 184, 77, 0.04));
+  border-left: 3px solid var(--warn);
+}
+.msg.player.party .msg-author { color: var(--warn); }
+
+/* Make the chat-area a bit more layered */
+.chat-area {
+  background: linear-gradient(180deg, var(--surface), var(--surface2));
+}
+.chat-log { padding: 18px; gap: 10px; }
+
+/* Smooth focus rings */
+input:focus, select:focus, textarea:focus, button:focus-visible {
+  outline: none;
+}
+button:focus-visible {
+  box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--accent);
+}
+
+/* Buttons get a subtle hover lift */
+button.primary:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 24px var(--accent-glow-strong);
+}
+
+/* Party card: subtle entrance + cleaner current-turn indicator */
+.party-card { transition: all var(--transition); }
+.party-card.current-turn {
+  border-color: var(--warn);
+  background: linear-gradient(180deg, var(--surface2), rgba(255, 184, 77, 0.06));
+}
+.party-card.you {
+  background: linear-gradient(180deg, var(--surface2), rgba(138, 92, 255, 0.08));
+}
+.party-name { gap: 8px; }
+.party-name-text { display: flex; flex-direction: column; gap: 2px; }
+.party-grade { font-size: 0.7rem; opacity: 0.8; }
+
+/* Refine party bars */
+.party-bar { height: 5px; border-radius: 999px; }
+.party-bar-fill { transition: width 400ms ease-out; }
+
+/* Mobile tweaks */
+@media (max-width: 800px) {
+  .turn-banner-inner { padding: 8px 12px; font-size: 0.85rem; }
+  .option-btn { font-size: 0.85rem; padding: 8px 12px; }
+}
