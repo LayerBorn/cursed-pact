@@ -41,10 +41,11 @@ export function defaultCharacter(name) {
     maxCursedEnergy: 80,
     statusEffects: [],
     items: [],
+    abilities: [],
   };
 }
 
-export function buildCharacter({ name, grade, technique, domain, stats }) {
+export function buildCharacter({ name, grade, technique, domain, stats, abilities }) {
   const base = STARTER_GRADE_HP[grade] || STARTER_GRADE_HP["Grade 3"];
   return {
     name: (name || "").trim() || "Unnamed sorcerer",
@@ -62,6 +63,7 @@ export function buildCharacter({ name, grade, technique, domain, stats }) {
     maxCursedEnergy: base.ce,
     statusEffects: [],
     items: [],
+    abilities: Array.isArray(abilities) ? abilities : [],
   };
 }
 

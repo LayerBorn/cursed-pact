@@ -5,8 +5,9 @@ import {
   updatePlayerCharacter,
   setPendingAction,
   clearPendingActions,
+  setObjective,
 } from "../firebase.js";
-import { applyMechanicsToCharacter, summarizeChange } from "./combat.js";
+import { applyMechanicsToCharacter, summarizeChange, rollWithStat, formatRoll } from "./combat.js";
 import {
   buildTurnUserMessage,
   callGemini,
@@ -33,7 +34,6 @@ export function nextTurnUid(turnOrder, currentUid) {
 
 // Submit the current player's action. Stored in pendingActions; host picks it up.
 export async function submitPlayerAction({ roomCode, uid, name, content, rolls = [] }) {
-  // Append to the chat log immediately so all clients see it.
   await postMessage(roomCode, {
     author: uid,
     authorName: name,
@@ -48,7 +48,6 @@ export async function submitPlayerAction({ roomCode, uid, name, content, rolls =
       content: r,
     });
   }
-  // Mark a pending action so the host knows to call the DM.
   await setPendingAction(roomCode, uid, {
     content,
     rolls,
@@ -56,9 +55,58 @@ export async function submitPlayerAction({ roomCode, uid, name, content, rolls =
   });
 }
 
-// Host-side: take the current room snapshot, call Gemini, write back the response.
-// `room` is the latest snapshot; returns nothing.
-export async function runDmTurn({ roomCode, room, hostUid }) {
+// Re-fetch the room state (passed via callback so we don't import firebase get
+// at module scope unnecessarily). The host always passes the latest snapshot in.
+async function callDmOnce({ roomCode, room, hostUid, apiKey }) {
+  const messages = messagesArray(room.messages).slice(-30);
+  const userMsg = buildTurnUserMessage(
+    room.players,
+    room.turnOrder,
+    room.currentTurn,
+    messages,
+    hostUid
+  );
+
+  const raw = await callGemini({
+    apiKey,
+    systemPrompt: DM_SYSTEM_PROMPT,
+    userMessage: userMsg,
+  });
+  return parseDmResponse(raw);
+}
+
+// Auto-roll for a player, post it to the chat, and return an updated room
+// snapshot reflecting the new message (we mutate the local clone since the
+// real Firebase update will propagate via the listener anyway).
+async function autoRollAndPost({ roomCode, room, needsRoll }) {
+  const player = room.players?.[needsRoll.playerId];
+  if (!player) return room;
+  const roll = rollWithStat(player.character, needsRoll.stat || "Technique");
+  const dcStr = needsRoll.dc != null ? ` vs DC ${needsRoll.dc}` : "";
+  const reasonStr = needsRoll.reason ? ` — ${needsRoll.reason}` : "";
+  const content = `${formatRoll(roll)}${dcStr}${reasonStr}`;
+  await postMessage(roomCode, {
+    author: needsRoll.playerId,
+    authorName: player.name,
+    type: "roll",
+    content,
+  });
+  // Append locally for the next prompt build.
+  const newId = `local-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  return {
+    ...room,
+    messages: {
+      ...(room.messages || {}),
+      [newId]: { author: needsRoll.playerId, authorName: player.name, type: "roll", content, timestamp: Date.now() },
+    },
+  };
+}
+
+// Host-side: handle one full "player did something" cycle. Calls Gemini up to
+// MAX_CHAIN times to resolve any auto-rolls inline, then advances the turn.
+const MAX_CHAIN = 4;
+
+export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
   const apiKey = loadStoredKey();
   if (!apiKey) {
     await postMessage(roomCode, {
@@ -70,86 +118,92 @@ export async function runDmTurn({ roomCode, room, hostUid }) {
     return;
   }
 
-  const messages = messagesArray(room.messages).slice(-30); // last 30 entries
-  const userMsg = buildTurnUserMessage(
-    room.players,
-    room.turnOrder,
-    room.currentTurn,
-    messages,
-    hostUid
-  );
-
-  // Mark a system "DM is thinking" message so others see something is happening.
-  const thinkingId = await postMessage(roomCode, {
+  await postMessage(roomCode, {
     author: "system",
     authorName: "system",
     type: "system",
     content: "The DM gathers their thoughts…",
   });
 
-  let raw;
-  try {
-    raw = await callGemini({
-      apiKey,
-      systemPrompt: DM_SYSTEM_PROMPT,
-      userMessage: userMsg,
-    });
-  } catch (err) {
-    await postMessage(roomCode, {
-      author: "system",
-      authorName: "system",
-      type: "system",
-      content: `DM error: ${err.message}`,
-    });
-    await clearPendingActions(roomCode);
-    return;
-  }
+  let room = initialRoom;
+  let lastMechanics = null;
 
-  const { narration, mechanics } = parseDmResponse(raw);
-
-  // Post the DM narration.
-  await postMessage(roomCode, {
-    author: "dm",
-    authorName: "DM",
-    type: "dm",
-    content: narration || "(the DM falls silent)",
-  });
-
-  // Apply mechanical state changes per player.
-  if (mechanics?.stateChanges?.length) {
-    for (const change of mechanics.stateChanges) {
-      const player = room.players?.[change.playerId];
-      if (!player) continue;
-      const newChar = applyMechanicsToCharacter(player.character, change);
-      await updatePlayerCharacter(roomCode, change.playerId, newChar);
-      const summary = summarizeChange(change, player.name);
-      if (summary) {
-        await postMessage(roomCode, {
-          author: "system",
-          authorName: "system",
-          type: "system",
-          content: summary,
-        });
-      }
-    }
-  }
-
-  // Surface "needsRoll" hints in chat — useful for the player whose turn it is.
-  if (mechanics?.needsRoll?.playerId) {
-    const r = mechanics.needsRoll;
-    const target = room.players?.[r.playerId];
-    if (target) {
+  for (let i = 0; i < MAX_CHAIN; i++) {
+    let result;
+    try {
+      result = await callDmOnce({ roomCode, room, hostUid, apiKey });
+    } catch (err) {
       await postMessage(roomCode, {
         author: "system",
         authorName: "system",
         type: "system",
-        content: `Roll needed — ${target.name}: d20 + ${r.stat || "stat"} mod vs DC ${r.dc ?? "?"} (${r.reason || "—"}).`,
+        content: `DM error: ${err.message}`,
+      });
+      await clearPendingActions(roomCode);
+      return;
+    }
+
+    const { narration, mechanics } = result;
+    lastMechanics = mechanics;
+
+    if (narration) {
+      await postMessage(roomCode, {
+        author: "dm",
+        authorName: "DM",
+        type: "dm",
+        content: narration,
       });
     }
+
+    // Apply mechanical state changes per player.
+    if (mechanics?.stateChanges?.length) {
+      for (const change of mechanics.stateChanges) {
+        const player = room.players?.[change.playerId];
+        if (!player) continue;
+        const newChar = applyMechanicsToCharacter(player.character, change);
+        await updatePlayerCharacter(roomCode, change.playerId, newChar);
+        // Update our local room copy so subsequent chained DM calls see fresh stats.
+        room = {
+          ...room,
+          players: {
+            ...room.players,
+            [change.playerId]: { ...player, character: newChar },
+          },
+        };
+        const summary = summarizeChange(change, player.name);
+        if (summary) {
+          await postMessage(roomCode, {
+            author: "system",
+            authorName: "system",
+            type: "system",
+            content: summary,
+          });
+        }
+      }
+    }
+
+    // Update objective if the DM set one.
+    if (typeof mechanics?.objective === "string" && mechanics.objective.trim()) {
+      try { await setObjective(roomCode, mechanics.objective.trim()); } catch {}
+    }
+
+    // If a roll is needed, auto-roll and chain the next call.
+    if (mechanics?.needsRoll?.playerId && room.players?.[mechanics.needsRoll.playerId]) {
+      room = await autoRollAndPost({ roomCode, room, needsRoll: mechanics.needsRoll });
+      // Keep currentTurn as the rolling player so the next prompt frames it correctly.
+      const stayUid = mechanics.needsRoll.playerId;
+      if (room.currentTurn !== stayUid) {
+        await setCurrentTurn(roomCode, stayUid);
+        room = { ...room, currentTurn: stayUid };
+      }
+      continue; // chain
+    }
+
+    break; // no more rolls — done
   }
 
-  // Advance the turn.
-  const nextUid = mechanics?.nextTurn || nextTurnUid(room.turnOrder, room.currentTurn);
+  // Advance the turn at the end of the chain.
+  const nextUid = lastMechanics?.nextTurn || nextTurnUid(room.turnOrder, room.currentTurn);
   if (nextUid && room.players?.[nextUid]) {
     await setCurrentTurn(roomCode, nextUid);
   }
@@ -157,11 +211,31 @@ export async function runDmTurn({ roomCode, room, hostUid }) {
   await clearPendingActions(roomCode);
 }
 
-// Decide whether the host should run a DM turn now.
-// Trigger when: pendingActions has the current-turn player's submission.
+// Whether the host should run a DM turn now. Two cases:
+// 1. No DM message has been posted yet AND the host has registered a character
+//    AND there's a "Campaign begins." system message → run opening turn.
+// 2. The current-turn player has submitted a pending action.
 export function shouldRunDmTurn(room) {
   if (!room) return false;
+  const msgs = Object.values(room.messages || {});
+  const hasAnyDmMsg = msgs.some((m) => m && m.type === "dm");
+  const hasCampaignBegan = msgs.some((m) => m && m.type === "system" && /Campaign begins/i.test(m.content || ""));
+  const hostRegistered = room.host && room.players && room.players[room.host];
+
+  if (!hasAnyDmMsg && hasCampaignBegan && hostRegistered) return true;
+
   const cur = room.currentTurn;
-  if (!cur) return false;
-  return Boolean(room.pendingActions && room.pendingActions[cur]);
+  if (cur && room.pendingActions && room.pendingActions[cur]) return true;
+  return false;
+}
+
+// Plant the "Campaign begins." marker so all clients see the opening prompt
+// and the host's listener triggers an opening DM call.
+export async function triggerCampaignStart({ roomCode }) {
+  await postMessage(roomCode, {
+    author: "system",
+    authorName: "system",
+    type: "system",
+    content: "Campaign begins.",
+  });
 }

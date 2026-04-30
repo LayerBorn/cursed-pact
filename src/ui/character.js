@@ -1,6 +1,7 @@
 import { $, $$, show, toast, el } from "./common.js";
 import { STARTER_TECHNIQUES, buildCharacter } from "../game/character.js";
 import { addPlayer, currentUid } from "../firebase.js";
+import { generateAbilities, loadStoredKey } from "../gemini.js";
 
 export function initCharacter({ onJoined }) {
   const picker = $("#technique-picker");
@@ -26,10 +27,12 @@ export function initCharacter({ onJoined }) {
     },
   }, "🎲 Random"));
 
-  $("#char-submit").addEventListener("click", async () => {
+  const submitBtn = $("#char-submit");
+
+  submitBtn.addEventListener("click", async () => {
     const roomCode = window.__app.currentRoomCode;
     if (!roomCode) { toast("No active room.", "error"); return; }
-    const character = buildCharacter({
+    const baseCharacter = buildCharacter({
       name: $("#char-name").value,
       grade: $("#char-grade").value,
       technique: $("#char-technique").value,
@@ -40,16 +43,47 @@ export function initCharacter({ onJoined }) {
         spirit: $("#stat-spirit").value,
       },
     });
-    if (!character.name || character.name === "Unnamed sorcerer") {
+    if (!baseCharacter.name || baseCharacter.name === "Unnamed sorcerer") {
       toast("Give your sorcerer a name.", "warn");
       return;
     }
+
+    const apiKey = loadStoredKey();
+    if (!apiKey) {
+      toast("Gemini API key missing — go back and paste it.", "error");
+      return;
+    }
+
+    submitBtn.disabled = true;
+    const originalLabel = submitBtn.textContent;
+    submitBtn.textContent = "Generating abilities…";
+
+    let abilities = [];
+    try {
+      abilities = await generateAbilities({
+        apiKey,
+        technique: baseCharacter.technique,
+        grade: baseCharacter.grade,
+      });
+    } catch (err) {
+      console.warn("Ability generation failed:", err);
+      toast(`Couldn't generate abilities (${err.message}). Joining anyway.`, "warn");
+    }
+
+    const character = { ...baseCharacter, abilities };
+
     try {
       await addPlayer(roomCode, currentUid(), character);
+      if (abilities.length) {
+        toast(`Abilities: ${abilities.map((a) => a.name).join(", ")}`, "ok");
+      }
       onJoined(roomCode);
     } catch (err) {
       console.error(err);
       toast(`Could not join room: ${err.message}`, "error");
+    } finally {
+      submitBtn.disabled = false;
+      submitBtn.textContent = originalLabel;
     }
   });
 }

@@ -1,12 +1,11 @@
-import { $, show, toast, el, escapeHtml, renderMarkdown, animateD20 } from "./common.js";
+import { $, show, toast, el, escapeHtml, renderMarkdown } from "./common.js";
 import {
   listenRoom,
   postMessage,
   currentUid,
   setPlayerOnline,
 } from "../firebase.js";
-import { rollD20, rollWithStat, formatRoll } from "../game/combat.js";
-import { messagesArray, submitPlayerAction, runDmTurn, shouldRunDmTurn } from "../game/room.js";
+import { messagesArray, submitPlayerAction, runDmTurn, shouldRunDmTurn, triggerCampaignStart } from "../game/room.js";
 
 let unsubscribeRoom = null;
 let lastRoom = null;
@@ -14,7 +13,7 @@ let renderedMessageIds = new Set();
 let roomCode = null;
 let isHost = false;
 let dmRunning = false;
-let pendingRolls = []; // rolls staged before sending the next action
+let campaignStartTriggered = false;
 
 export function initGame({ onLeave }) {
   $("#btn-leave").addEventListener("click", async () => {
@@ -30,64 +29,17 @@ export function initGame({ onLeave }) {
     await sendAction();
   });
 
-  $("#btn-quick-roll").addEventListener("click", async () => {
-    const my = lastRoom?.players?.[currentUid()];
-    if (!my) return;
-    const roll = rollD20();
-    const line = `d20: **${roll}**`;
-    pendingRolls.push(line);
-    toast(`Staged d20 = ${roll}. Send your action to commit.`, "ok");
-    // Also append a transient note in the action box.
-    const t = $("#action-input");
-    t.value = (t.value ? t.value + "\n" : "") + `[rolled d20: ${roll}]`;
-  });
-
-  $("#btn-roll").addEventListener("click", async () => {
-    const my = lastRoom?.players?.[currentUid()];
-    if (!my) return;
-    // Use last needsRoll request if present in chat — otherwise raw d20.
-    const last = findLastNeedsRoll();
-    let roll;
-    if (last) {
-      roll = rollWithStat(my.character, last.stat || "Technique");
-    } else {
-      const d = rollD20();
-      roll = { die: d, mod: 0, total: d, statName: "raw", crit: d === 20, fumble: d === 1 };
-    }
-    pendingRolls.push(formatRoll(roll));
-    await postMessage(roomCode, {
-      author: currentUid(),
-      authorName: my.name,
-      type: "roll",
-      content: formatRoll(roll),
-    });
-    $("#dice-tray").classList.add("hidden");
-    toast(`Rolled ${roll.total}. Describe your action and send.`, "ok");
-  });
-}
-
-function findLastNeedsRoll() {
-  if (!lastRoom) return null;
-  const msgs = messagesArray(lastRoom.messages);
-  const me = currentUid();
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
-    if (m.type === "system" && /Roll needed/.test(m.content || "")) {
-      // crude parse: extract DC and stat
-      const dcMatch = (m.content.match(/DC\s+(\d+)/) || [])[1];
-      const statMatch = (m.content.match(/d20\s*\+\s*(\w+)/) || [])[1];
-      return { dc: dcMatch ? Number(dcMatch) : null, stat: statMatch || "Technique" };
-    }
-    // Only look in recent messages, stop after the previous DM turn
-    if (m.type === "dm" && i < msgs.length - 1) break;
-  }
-  return null;
+  // Hide the now-vestigial dice buttons — auto-roll handles checks.
+  const tray = $("#dice-tray");
+  if (tray) tray.classList.add("hidden");
+  const quickRoll = $("#btn-quick-roll");
+  if (quickRoll) quickRoll.style.display = "none";
 }
 
 async function sendAction() {
   const text = $("#action-input").value.trim();
-  if (!text && !pendingRolls.length) {
-    toast("Type something to do, or roll first.", "warn");
+  if (!text) {
+    toast("Type something to do.", "warn");
     return;
   }
   const my = lastRoom?.players?.[currentUid()];
@@ -96,13 +48,12 @@ async function sendAction() {
     toast("Not your turn — but I'll send anyway.", "warn");
   }
 
-  const rolls = pendingRolls.splice(0);
   await submitPlayerAction({
     roomCode,
     uid: currentUid(),
     name: my.name,
-    content: text || "(acts without speaking)",
-    rolls,
+    content: text,
+    rolls: [],
   });
   $("#action-input").value = "";
 }
@@ -110,6 +61,7 @@ async function sendAction() {
 export function joinRoom({ code, host }) {
   roomCode = code;
   isHost = host;
+  campaignStartTriggered = false;
   window.__app.currentRoomCode = code;
 
   $("#game-room-code").textContent = code;
@@ -124,6 +76,23 @@ export function joinRoom({ code, host }) {
     lastRoom = room;
     renderRoom(room);
 
+    // Host: kick the campaign off once we've registered our own character.
+    if (isHost && !campaignStartTriggered) {
+      const hostUid = currentUid();
+      const msgs = Object.values(room.messages || {});
+      const hasCampaignMsg = msgs.some((m) => m && m.type === "system" && /Campaign begins/i.test(m.content || ""));
+      const hostHasCharacter = room.players && room.players[hostUid];
+      if (hostHasCharacter && !hasCampaignMsg) {
+        campaignStartTriggered = true;
+        triggerCampaignStart({ roomCode: code }).catch((err) => {
+          console.error("Failed to start campaign:", err);
+          campaignStartTriggered = false;
+        });
+      } else if (hasCampaignMsg) {
+        campaignStartTriggered = true;
+      }
+    }
+
     // Host orchestrates DM turns.
     if (isHost && !dmRunning && shouldRunDmTurn(room)) {
       dmRunning = true;
@@ -136,7 +105,6 @@ export function joinRoom({ code, host }) {
     }
   });
 
-  // Mark online + heartbeat lastSeen.
   setPlayerOnline(code, currentUid(), true).catch(() => {});
 }
 
@@ -146,7 +114,7 @@ function leaveRoom() {
   renderedMessageIds = new Set();
   roomCode = null;
   isHost = false;
-  pendingRolls = [];
+  campaignStartTriggered = false;
   $("#chat-log").innerHTML = "";
   $("#party-list").innerHTML = "";
   $("#action-input").value = "";
@@ -154,9 +122,29 @@ function leaveRoom() {
 }
 
 function renderRoom(room) {
+  renderObjective(room);
   renderParty(room);
   renderMessages(room);
   renderTurnState(room);
+}
+
+function renderObjective(room) {
+  let bar = document.getElementById("objective-bar");
+  if (!bar) {
+    const layout = document.querySelector(".chat-area");
+    if (!layout) return;
+    bar = document.createElement("div");
+    bar.id = "objective-bar";
+    bar.className = "objective-bar hidden";
+    layout.insertBefore(bar, layout.firstChild);
+  }
+  if (room.objective && typeof room.objective === "string") {
+    bar.classList.remove("hidden");
+    bar.innerHTML = `<span class="objective-label">Objective</span><span class="objective-text"></span>`;
+    bar.querySelector(".objective-text").textContent = room.objective;
+  } else {
+    bar.classList.add("hidden");
+  }
 }
 
 function renderParty(room) {
@@ -168,7 +156,6 @@ function renderParty(room) {
     list.appendChild(el("p", { class: "muted small" }, "No players yet."));
     return;
   }
-  // Sort by turn order if present, else by name.
   const order = room.turnOrder || [];
   players.sort((a, b) => {
     const ai = order.indexOf(a.uid); const bi = order.indexOf(b.uid);
@@ -198,6 +185,21 @@ function renderParty(room) {
     card.appendChild(hpBar);
     card.appendChild(el("div", { class: "party-meta" }, [`CE ${c.cursedEnergy ?? 0}/${c.maxCursedEnergy ?? 0}`, ""]));
     card.appendChild(ceBar);
+
+    if (Array.isArray(c.abilities) && c.abilities.length) {
+      const abList = el("div", { class: "party-abilities" });
+      abList.appendChild(el("div", { class: "party-abilities-label" }, "Abilities"));
+      for (const a of c.abilities) {
+        abList.appendChild(el("div", {
+          class: "ability-row",
+          title: a.effect || "",
+        }, [
+          el("span", { class: "ability-name" }, escapeHtml(a.name || "?")),
+          el("span", { class: "ability-cost" }, `${a.cost ?? 0} CE`),
+        ]));
+      }
+      card.appendChild(abList);
+    }
 
     const status = el("div", { class: "party-status" });
     for (const s of (c.statusEffects || [])) {
@@ -258,40 +260,6 @@ function renderTurnState(room) {
   const me = currentUid();
   const myTurn = room.currentTurn === me;
   $("#game-turn-badge").classList.toggle("hidden", !myTurn);
-
-  // Show dice tray if there's a pending needsRoll for me.
-  const needsRoll = findLastNeedsRollFor(me, room);
-  $("#dice-tray").classList.toggle("hidden", !needsRoll);
-  if (needsRoll) {
-    $("#dice-prompt").textContent =
-      `DM wants a d20 + ${needsRoll.stat || "stat"} mod vs DC ${needsRoll.dc ?? "?"} (${needsRoll.reason || "—"}).`;
-  }
-}
-
-function findLastNeedsRollFor(uid, room) {
-  const msgs = messagesArray(room.messages);
-  // Walk back. If we see this player's roll AFTER the last "Roll needed" for them, no longer pending.
-  let needed = null;
-  for (let i = msgs.length - 1; i >= 0; i--) {
-    const m = msgs[i];
-    if (m.type === "system" && /Roll needed/.test(m.content || "")) {
-      // Only matches if this player's name is in the prompt — best-effort match by uid->name
-      const player = room.players?.[uid];
-      if (player && m.content.includes(player.name)) {
-        const dcMatch = (m.content.match(/DC\s+(\d+)/) || [])[1];
-        const statMatch = (m.content.match(/d20\s*\+\s*(\w+)/) || [])[1];
-        const reasonMatch = (m.content.match(/\(([^)]+)\)\.\s*$/) || [])[1];
-        needed = { dc: dcMatch ? Number(dcMatch) : null, stat: statMatch || "Technique", reason: reasonMatch || "" };
-        // Check whether a roll from this player came after this system message.
-        for (let j = i + 1; j < msgs.length; j++) {
-          if (msgs[j].type === "roll" && msgs[j].author === uid) { needed = null; break; }
-        }
-        break;
-      }
-    }
-    if (m.type === "dm" && i < msgs.length - 1) break;
-  }
-  return needed;
 }
 
 function truncate(s, n) {

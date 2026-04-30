@@ -170,4 +170,8 @@ export async function setRoomStatus(roomCode, status) {
   await set(roomRef(roomCode, "status"), status);
 }
 
+export async function setObjective(roomCode, objective) {
+  await set(roomRef(roomCode, "objective"), objective || null);
+}
+
 export { ref, set, get, update };
