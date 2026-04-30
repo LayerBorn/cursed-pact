@@ -220,14 +220,18 @@ function formatAbilities(abilities) {
   return abilities.map((a) => `${a.name} [${a.cost ?? 0} CE — ${a.effect || "?"}]`).join("; ");
 }
 
-// ─────────────── Ability generator ───────────────
-// Called once during character creation to derive named abilities from the
-// player's free-form technique description.
-const ABILITY_GEN_PROMPT = `You convert a Jujutsu Kaisen sorcerer's free-form cursed technique description into 3 NAMED abilities the player can invoke during play.
+// ─────────────── Ability + stat generator ───────────────
+// Called once during character creation to derive both NAMED abilities and
+// balanced stats (Phys / Tech / Spirit, each 1-20) from the player's
+// free-form technique description.
+const ABILITY_GEN_PROMPT = `You convert a Jujutsu Kaisen sorcerer's free-form cursed technique description into:
+  (a) 3 NAMED abilities the player can invoke during play, and
+  (b) a balanced set of three stats (Physical, Technique, Spirit), each 1–20.
 
-For the given technique, output EXACTLY a JSON object (no prose, no markdown fence) with this shape:
+Output EXACTLY a JSON object (no prose, no markdown fence) with this shape:
 
 {
+  "stats": { "phys": 12, "tech": 14, "spirit": 11 },
   "abilities": [
     { "name": "Short Punchy Name", "cost": 10, "effect": "one-sentence concrete effect, mechanically clear, ≤140 chars" },
     { "name": "Second Ability", "cost": 25, "effect": "..." },
@@ -235,14 +239,24 @@ For the given technique, output EXACTLY a JSON object (no prose, no markdown fen
   ]
 }
 
-Rules:
+STAT RULES
+- All three stats are 1–20. The sum should land within the budget for the grade:
+  Grade 4 → ~30 total. Grade 3 → ~36. Grade 2 → ~42. Grade 1 → ~48. Semi-Grade 1 → ~46. Special Grade → ~54.
+- Distribute the points to FIT the technique:
+  - "Physical" tracks raw striking power, durability, melee. Heavenly Restriction, brawler-types, raw cursed bodies skew high.
+  - "Technique" tracks finesse, precision, reflexes, sorcerous control of complex effects. Limitless, Ten Shadows, Cursed Speech skew high.
+  - "Spirit" tracks cursed-energy reserve, RCT aptitude, mental fortitude. Domain users, sealing types, healer types skew high.
+- No stat below 6 unless the technique explicitly demands a weakness.
+
+ABILITY RULES
 - Exactly 3 abilities, ordered cheap → expensive.
 - Costs are cursed-energy points (CE). Use 5–15 for cantrip-tier, 20–40 for combat-staple, 50–80 for signature/finisher.
 - Each ability must be ROOTED in the technique description. If the technique is "Fire Manipulation", abilities should all be flame-themed.
 - Effects must be concrete: damage, area, status, duration, conditions. Avoid "very powerful", "destroys everything".
 - Names should sound JJK-canon: short, evocative, sometimes bilingual (English ok).
 - Do NOT include domain expansion in this list — domain expansion is separate.
-- Output ONLY the JSON object. No markdown, no commentary.`;
+
+Output ONLY the JSON object. No markdown, no commentary.`;
 
 export async function generateAbilities({ apiKey, technique, grade }) {
   const userMsg = `Sorcerer grade: ${grade || "Grade 3"}\nCursed technique:\n"""\n${(technique || "").trim() || "(undeclared technique — invent something generic)"}\n"""`;
@@ -260,15 +274,15 @@ export async function generateAbilities({ apiKey, technique, grade }) {
   let parsed;
   try { parsed = JSON.parse(text); }
   catch (e) {
-    // Last-ditch: find the first { ... } block.
     const m = text.match(/\{[\s\S]*\}/);
     if (m) {
       try { parsed = JSON.parse(m[0]); } catch {}
     }
-    if (!parsed) throw new Error("Could not parse abilities JSON.");
+    if (!parsed) throw new Error("Could not parse generator JSON.");
   }
+
   const abilities = Array.isArray(parsed.abilities) ? parsed.abilities : [];
-  return abilities
+  const cleanedAbilities = abilities
     .filter((a) => a && typeof a.name === "string" && typeof a.effect === "string")
     .slice(0, 4)
     .map((a) => ({
@@ -276,6 +290,22 @@ export async function generateAbilities({ apiKey, technique, grade }) {
       cost: Number.isFinite(Number(a.cost)) ? Math.max(0, Math.min(200, Math.round(Number(a.cost)))) : 10,
       effect: String(a.effect).slice(0, 200),
     }));
+
+  let stats = null;
+  if (parsed.stats && typeof parsed.stats === "object") {
+    const clamp = (n, def) => {
+      const v = Number(n);
+      if (!Number.isFinite(v)) return def;
+      return Math.max(1, Math.min(20, Math.round(v)));
+    };
+    stats = {
+      phys: clamp(parsed.stats.phys, 12),
+      tech: clamp(parsed.stats.tech, 12),
+      spirit: clamp(parsed.stats.spirit, 12),
+    };
+  }
+
+  return { abilities: cleanedAbilities, stats };
 }
 
 // ─────────────── Parsing the DM response ───────────────

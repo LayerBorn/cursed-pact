@@ -371,6 +371,55 @@ button.link {
 .key-gate-actions button { width: auto; margin: 0; }
 .dot-sep { margin: 0 4px; color: var(--border); }
 
+/* ─────────────── Char counters ─────────────── */
+.char-counter {
+  font-size: 0.7rem;
+  color: var(--muted);
+  text-align: right;
+  margin-top: 4px;
+  font-variant-numeric: tabular-nums;
+}
+.char-counter.near-limit { color: var(--warn); }
+
+.ai-stats-note {
+  margin-top: 12px;
+  padding: 8px 10px;
+  background: rgba(138, 92, 255, 0.06);
+  border: 1px solid rgba(138, 92, 255, 0.2);
+  border-radius: 6px;
+}
+
+/* ─────────────── Party stats line + kick btn + inactivity ─────────────── */
+.party-stats {
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.04em;
+  margin-bottom: 4px;
+}
+.party-name { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
+.btn-kick {
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--muted);
+  font-size: 0.85rem;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border-radius: 4px;
+  margin: 0;
+  line-height: 1;
+  cursor: pointer;
+}
+.btn-kick:hover { background: var(--danger); color: white; border-color: var(--danger); }
+
+.party-card.inactive { opacity: 0.6; }
+.status-tag.warn { color: var(--warn); border-color: rgba(255, 184, 77, 0.3); }
+
+/* ─────────────── Lock-grade selector ─────────────── */
+.lobby-half label.small { display: block; margin-top: 8px; font-size: 0.78rem; }
+.lobby-half label.small select { margin-top: 4px; }
+
 .party-status { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .status-tag {
   font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;

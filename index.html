@@ -54,6 +54,17 @@
           <div class="lobby-half">
             <h2>Create a room</h2>
             <p class="muted small">You'll be the host. Only the host's browser calls Gemini.</p>
+            <label class="small">Lock everyone to a grade (optional)
+              <select id="lock-grade">
+                <option value="">Free choice</option>
+                <option value="Grade 4">Grade 4</option>
+                <option value="Grade 3">Grade 3</option>
+                <option value="Grade 2">Grade 2</option>
+                <option value="Grade 1">Grade 1</option>
+                <option value="Semi-Grade 1">Semi-Grade 1</option>
+                <option value="Special Grade">Special Grade</option>
+              </select>
+            </label>
             <button id="btn-create" class="primary">Create room</button>
           </div>
           <div class="vsep"></div>
@@ -98,26 +109,17 @@
         </label>
 
         <label>Cursed technique
-          <textarea id="char-technique" rows="3" placeholder="Describe your technique freely, or pick one below."></textarea>
+          <textarea id="char-technique" rows="3" maxlength="400" placeholder="Describe your technique freely, or pick one below."></textarea>
+          <div class="char-counter" id="char-technique-counter">0 / 400</div>
         </label>
 
         <div class="technique-picker" id="technique-picker"></div>
 
-        <div class="stats-grid">
-          <label>Physical (STR)
-            <input id="stat-phys" type="number" min="1" max="20" value="12" />
-          </label>
-          <label>Technique (AGI/INT)
-            <input id="stat-tech" type="number" min="1" max="20" value="12" />
-          </label>
-          <label>Spirit (CE control)
-            <input id="stat-spirit" type="number" min="1" max="20" value="12" />
-          </label>
-        </div>
-        <p class="muted small">Distribute as you wish. Most starters average 12 per stat. (1d20 + (stat-10)/2 modifier on rolls.)</p>
+        <p class="muted small ai-stats-note">Stats (Physical / Technique / Spirit) will be assigned by the AI based on your technique and grade.</p>
 
         <label class="optional">Domain expansion <span class="muted small">(optional, may stay locked)</span>
-          <textarea id="char-domain" rows="2" placeholder="e.g. Malevolent Shrine — a domain that does not need a barrier..."></textarea>
+          <textarea id="char-domain" rows="2" maxlength="300" placeholder="e.g. Malevolent Shrine — a domain that does not need a barrier..."></textarea>
+          <div class="char-counter" id="char-domain-counter">0 / 300</div>
         </label>
 
         <button id="char-submit" class="primary">Enter the room</button>
@@ -168,8 +170,10 @@
           </div>
 
           <form id="action-form" class="action-form">
-            <textarea id="action-input" rows="2" placeholder="Describe what your sorcerer does…"></textarea>
+            <textarea id="action-input" rows="2" maxlength="500" placeholder="Describe what your sorcerer does…"></textarea>
             <div class="action-row">
+              <div class="char-counter" id="action-counter">0 / 500</div>
+              <div style="flex:1;"></div>
               <button type="button" id="btn-quick-roll" class="ghost small" title="Roll a d20">d20</button>
               <button type="submit" id="btn-send" class="primary">Send</button>
             </div>

@@ -26,9 +26,15 @@ export function initLobby({ onJoin }) {
       if (!(await roomExists(code))) break;
     }
     if (!code) { toast("Couldn't generate a room code.", "error"); return; }
+    const lockedGrade = ($("#lock-grade").value || "").trim() || null;
     try {
-      await createRoom(code, uid);
-      toast(`Room ${code} created. You are the host.`, "ok");
+      await createRoom(code, uid, { lockedGrade });
+      toast(
+        lockedGrade
+          ? `Room ${code} created (locked to ${lockedGrade}). You are the host.`
+          : `Room ${code} created. You are the host.`,
+        "ok"
+      );
       onJoin(code, /*isHost*/ true);
     } catch (err) {
       console.error(err);

@@ -265,18 +265,26 @@ export async function generateMissingAbilities({ roomCode, room }) {
     const hasAbilities = Array.isArray(c.abilities) && c.abilities.length > 0;
     if (!tech || tech === "(undeclared technique)" || hasAbilities) continue;
     try {
-      const abilities = await generateAbilities({
+      const { abilities, stats } = await generateAbilities({
         apiKey,
         technique: tech,
         grade: c.grade,
       });
-      if (abilities.length) {
-        await updatePlayerCharacter(roomCode, p.uid, { ...c, abilities });
+      if (abilities.length || stats) {
+        const updated = {
+          ...c,
+          ...(abilities.length ? { abilities } : {}),
+          ...(stats ? { stats } : {}),
+        };
+        await updatePlayerCharacter(roomCode, p.uid, updated);
+        const bits = [];
+        if (abilities.length) bits.push(`abilities: ${abilities.map((a) => a.name).join(", ")}`);
+        if (stats) bits.push(`stats: P${stats.phys}/T${stats.tech}/S${stats.spirit}`);
         await postMessage(roomCode, {
           author: "system",
           authorName: "system",
           type: "system",
-          content: `Generated abilities for ${c.name}: ${abilities.map((a) => a.name).join(", ")}`,
+          content: `Generated for ${c.name} — ${bits.join(" · ")}`,
         });
       }
     } catch (err) {

@@ -81,11 +81,12 @@ export async function roomExists(roomCode) {
   return snap.exists();
 }
 
-export async function createRoom(roomCode, hostUid) {
+export async function createRoom(roomCode, hostUid, options = {}) {
   const initial = {
     host: hostUid,
     createdAt: serverTimestamp(),
-    status: "lobby", // lobby | playing
+    status: "lobby",
+    lockedGrade: options.lockedGrade || null,
     players: {},
     turnOrder: [],
     currentTurn: null,
@@ -105,28 +106,55 @@ export async function addPlayer(roomCode, uid, character) {
   };
   await set(roomRef(roomCode, `players/${uid}`), playerData);
 
-  // Append to turnOrder if not already there.
   await runTransaction(roomRef(roomCode, "turnOrder"), (current) => {
     const order = current || [];
     if (!order.includes(uid)) order.push(uid);
     return order;
   });
 
-  // If no current turn yet, set this player.
   await runTransaction(roomRef(roomCode, "currentTurn"), (current) => {
     return current || uid;
   });
 
-  // Mark them offline if they disconnect.
-  onDisconnect(roomRef(roomCode, `players/${uid}/online`)).set(false);
+  // We deliberately DO NOT set online=false on disconnect any more — closing
+  // a tab no longer marks the player offline. Inactivity is tracked via
+  // lastSeen instead. We still bump lastSeen on disconnect so other clients
+  // see how stale the player is.
   onDisconnect(roomRef(roomCode, `players/${uid}/lastSeen`)).set(serverTimestamp());
 }
 
+// Just bump lastSeen — used as a heartbeat from the active tab.
+export async function bumpLastSeen(roomCode, uid) {
+  await update(roomRef(roomCode, `players/${uid}`), {
+    lastSeen: serverTimestamp(),
+  });
+}
+
 export async function setPlayerOnline(roomCode, uid, online) {
+  // Kept for backwards compatibility, but UI no longer reads `online`.
   await update(roomRef(roomCode, `players/${uid}`), {
     online,
     lastSeen: serverTimestamp(),
   });
+}
+
+// Host action: remove a player from the room and from the turn order.
+export async function kickPlayer(roomCode, uid) {
+  await set(roomRef(roomCode, `players/${uid}`), null);
+  await runTransaction(roomRef(roomCode, "turnOrder"), (order) => {
+    if (!Array.isArray(order)) return order;
+    return order.filter((u) => u !== uid);
+  });
+  // If they were the current turn, advance.
+  const curRef = roomRef(roomCode, "currentTurn");
+  const snap = await get(curRef);
+  if (snap.exists() && snap.val() === uid) {
+    const orderSnap = await get(roomRef(roomCode, "turnOrder"));
+    const order = orderSnap.val() || [];
+    await set(curRef, order[0] || null);
+  }
+  // Clear any pending action they had.
+  await set(roomRef(roomCode, `pendingActions/${uid}`), null);
 }
 
 export function listenRoom(roomCode, callback) {

@@ -4,8 +4,16 @@ import {
   postMessage,
   currentUid,
   setPlayerOnline,
+  bumpLastSeen,
+  kickPlayer,
 } from "../firebase.js";
 import { messagesArray, submitPlayerAction, runDmTurn, shouldRunDmTurn, triggerCampaignStart, generateMissingAbilities } from "../game/room.js";
+import { findProfanity } from "../util/profanity.js";
+
+const INACTIVE_AFTER_MS = 60 * 1000; // 1 minute of no heartbeat → "inactive"
+const HEARTBEAT_MS = 25 * 1000;
+let heartbeatTimer = null;
+let inactivityRefreshTimer = null;
 
 let unsubscribeRoom = null;
 let lastRoom = null;
@@ -29,6 +37,19 @@ export function initGame({ onLeave }) {
     e.preventDefault();
     await sendAction();
   });
+
+  // Live char counter on the action input.
+  const actionInput = $("#action-input");
+  const actionCounter = $("#action-counter");
+  if (actionInput && actionCounter) {
+    const updateAC = () => {
+      const len = (actionInput.value || "").length;
+      actionCounter.textContent = `${len} / 500`;
+      actionCounter.classList.toggle("near-limit", len > 425);
+    };
+    actionInput.addEventListener("input", updateAC);
+    updateAC();
+  }
 
   $("#btn-start-campaign").addEventListener("click", async () => {
     const btn = $("#btn-start-campaign");
@@ -57,6 +78,15 @@ async function sendAction() {
     toast("Type something to do.", "warn");
     return;
   }
+  if (text.length > 500) {
+    toast("Action too long (max 500 chars).", "warn");
+    return;
+  }
+  const profane = findProfanity(text);
+  if (profane) {
+    toast(`Profanity detected — please rephrase.`, "error");
+    return;
+  }
   const my = lastRoom?.players?.[currentUid()];
   if (!my) { toast("Not in this room.", "error"); return; }
   if (lastRoom.currentTurn && lastRoom.currentTurn !== currentUid()) {
@@ -71,6 +101,9 @@ async function sendAction() {
     rolls: [],
   });
   $("#action-input").value = "";
+  // Reset counter
+  const counter = $("#action-counter");
+  if (counter) { counter.textContent = "0 / 500"; counter.classList.remove("near-limit"); }
 }
 
 export function joinRoom({ code, host }) {
@@ -112,10 +145,37 @@ export function joinRoom({ code, host }) {
   });
 
   setPlayerOnline(code, currentUid(), true).catch(() => {});
+
+  // Heartbeat: bump lastSeen periodically while the tab is active.
+  if (heartbeatTimer) clearInterval(heartbeatTimer);
+  heartbeatTimer = setInterval(() => {
+    if (document.visibilityState !== "visible") return;
+    if (!roomCode) return;
+    bumpLastSeen(roomCode, currentUid()).catch(() => {});
+  }, HEARTBEAT_MS);
+
+  // Tab regaining focus → bump immediately so others see we're back.
+  document.addEventListener("visibilitychange", onVisibilityChange);
+
+  // Re-render party every 15s so the inactivity tag updates as time passes
+  // even without a Firebase change.
+  if (inactivityRefreshTimer) clearInterval(inactivityRefreshTimer);
+  inactivityRefreshTimer = setInterval(() => {
+    if (lastRoom) renderParty(lastRoom);
+  }, 15 * 1000);
+}
+
+function onVisibilityChange() {
+  if (document.visibilityState === "visible" && roomCode) {
+    bumpLastSeen(roomCode, currentUid()).catch(() => {});
+  }
 }
 
 function leaveRoom() {
   if (unsubscribeRoom) { try { unsubscribeRoom(); } catch {} unsubscribeRoom = null; }
+  if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  if (inactivityRefreshTimer) { clearInterval(inactivityRefreshTimer); inactivityRefreshTimer = null; }
+  document.removeEventListener("visibilitychange", onVisibilityChange);
   lastRoom = null;
   renderedMessageIds = new Set();
   roomCode = null;
@@ -279,18 +339,48 @@ function renderParty(room) {
     if (bi === -1) return -1;
     return ai - bi;
   });
+  const now = Date.now();
   for (const p of players) {
     const c = p.character || {};
     const isYou = p.uid === me;
     const isCurrent = room.currentTurn === p.uid;
+    const inactive = isInactive(p, now);
     const card = el("div", {
-      class: `party-card ${isYou ? "you" : ""} ${isCurrent ? "current-turn" : ""} ${p.online ? "" : "offline"}`,
+      class: `party-card ${isYou ? "you" : ""} ${isCurrent ? "current-turn" : ""} ${inactive ? "inactive" : ""}`,
     });
-    card.appendChild(el("div", { class: "party-name" }, [
-      `${escapeHtml(c.name || p.name || "?")} `,
-      el("span", { class: "party-grade" }, escapeHtml(c.grade || "")),
-    ]));
+
+    const nameRow = el("div", { class: "party-name" }, [
+      el("span", {}, [
+        `${escapeHtml(c.name || p.name || "?")} `,
+        el("span", { class: "party-grade" }, escapeHtml(c.grade || "")),
+      ]),
+    ]);
+
+    // Host kick button (not for self).
+    if (isHost && p.uid !== me) {
+      nameRow.appendChild(el("button", {
+        class: "btn-kick",
+        title: `Kick ${c.name || "player"}`,
+        onclick: async () => {
+          if (!confirm(`Kick ${c.name || "this player"} from the room?`)) return;
+          try {
+            await kickPlayer(roomCode, p.uid);
+            toast(`Kicked ${c.name || "player"}.`, "ok");
+          } catch (err) {
+            console.error(err);
+            toast(`Couldn't kick: ${err.message}`, "error");
+          }
+        },
+      }, "✕"));
+    }
+    card.appendChild(nameRow);
+
     card.appendChild(el("div", { class: "party-technique" }, escapeHtml(truncate(c.technique || "(no technique)", 80))));
+
+    if (c.stats) {
+      card.appendChild(el("div", { class: "party-stats" },
+        `P${c.stats.phys ?? "-"} · T${c.stats.tech ?? "-"} · S${c.stats.spirit ?? "-"}`));
+    }
 
     const hpPct = Math.max(0, Math.min(100, Math.round(((c.hp ?? 0) / (c.maxHp || 1)) * 100)));
     const cePct = Math.max(0, Math.min(100, Math.round(((c.cursedEnergy ?? 0) / (c.maxCursedEnergy || 1)) * 100)));
@@ -320,11 +410,17 @@ function renderParty(room) {
     for (const s of (c.statusEffects || [])) {
       status.appendChild(el("span", { class: "status-tag" }, escapeHtml(s)));
     }
-    if (!p.online) status.appendChild(el("span", { class: "status-tag bad" }, "offline"));
+    if (inactive) status.appendChild(el("span", { class: "status-tag warn", title: "No activity for over a minute" }, "inactive"));
     card.appendChild(status);
 
     list.appendChild(card);
   }
+}
+
+function isInactive(player, now) {
+  const ls = Number(player?.lastSeen);
+  if (!Number.isFinite(ls) || ls <= 0) return false;
+  return now - ls > INACTIVE_AFTER_MS;
 }
 
 function renderMessages(room) {
