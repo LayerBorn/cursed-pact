@@ -7,12 +7,12 @@ import {
   roomExists,
   createRoom,
 } from "../firebase.js";
-import { loadStoredKey } from "../gemini.js";
+import { hostHasDmProvider } from "../gemini.js";
 
 export function initLobby({ onJoin }) {
   $("#btn-create").addEventListener("click", async () => {
-    if (!loadStoredKey()) {
-      toast("Hosts need a Gemini API key to run the DM.", "warn");
+    if (!hostHasDmProvider()) {
+      toast("Hosts need a DM provider — pick Gemini key or Ollama.", "warn");
       window.__app.returnViewAfterKey = "view-lobby";
       show("view-key");
       return;

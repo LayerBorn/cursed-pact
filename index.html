@@ -14,30 +14,64 @@
     <!-- Toast container -->
     <div id="toasts" aria-live="polite"></div>
 
-    <!-- ============ API KEY GATE (hosts only) ============ -->
+    <!-- ============ DM PROVIDER GATE (hosts only) ============ -->
     <section id="view-key" class="view">
       <div class="card centered">
-        <h1 class="title">Gemini API key</h1>
+        <h1 class="title">DM provider</h1>
         <p class="subtitle muted">Required only if you're hosting a room.</p>
         <div class="divider"></div>
-        <p class="muted">
-          The host's browser is the only one that calls Gemini — both for the DM
-          and for generating each player's abilities. <strong>If you're joining a
-          friend's room, you don't need a key.</strong>
-        </p>
-        <p class="muted small">
-          Your key is stored only in this browser's localStorage and is sent
-          directly to Google. Get one free at
-          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
-        </p>
-        <input id="key-input" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
-        <label class="checkbox">
-          <input type="checkbox" id="key-show" /> Show key
-        </label>
+
+        <div class="provider-tabs">
+          <label class="provider-tab">
+            <input type="radio" name="provider" value="gemini" checked />
+            <span>Gemini (cloud)</span>
+          </label>
+          <label class="provider-tab">
+            <input type="radio" name="provider" value="ollama" />
+            <span>Ollama (local PC)</span>
+          </label>
+        </div>
+
+        <!-- Gemini panel -->
+        <div id="provider-gemini" class="provider-panel">
+          <p class="muted small">
+            Each host runs the DM using their own Google Gemini key. Stored only
+            in this browser, sent directly to Google. <strong>Joiners don't need
+            a key.</strong>
+          </p>
+          <p class="muted small">
+            Free key at <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+          </p>
+          <input id="key-input" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+          <label class="checkbox">
+            <input type="checkbox" id="key-show" /> Show key
+          </label>
+        </div>
+
+        <!-- Ollama panel -->
+        <div id="provider-ollama" class="provider-panel hidden">
+          <p class="muted small">
+            Run a local LLM on the host's PC via <a href="https://ollama.com" target="_blank" rel="noopener">Ollama</a>.
+            No cloud calls, no rate limits. Only the host's browser talks to it
+            (your laptop, on <code>localhost</code>). Joiners don't need anything.
+          </p>
+          <p class="muted small">
+            Make sure <code>ollama serve</code> is running and you've pulled a model
+            (e.g. <code>ollama pull qwen2.5:14b</code>).
+          </p>
+          <label>Ollama URL
+            <input id="ollama-url" type="text" placeholder="http://localhost:11434" autocomplete="off" />
+          </label>
+          <label>Model
+            <input id="ollama-model" type="text" placeholder="qwen2.5:14b" autocomplete="off" />
+          </label>
+          <button id="ollama-test" class="ghost small">Test connection</button>
+        </div>
+
         <button id="key-save" class="primary">Save &amp; continue</button>
         <div class="key-gate-actions">
           <button id="key-back" class="ghost small">Back to lobby</button>
-          <button id="key-clear" class="ghost small">Forget stored key</button>
+          <button id="key-clear" class="ghost small">Forget stored values</button>
         </div>
         <p id="key-status" class="muted small"></p>
       </div>

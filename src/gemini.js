@@ -1,11 +1,13 @@
-// Gemini API wrapper. The host's browser sends the full party state + recent
-// action history on each DM turn. The DM responds with narration plus a fenced
-// JSON block describing state changes and whose turn is next.
-const MODEL_ID = "gemini-2.5-flash";
-const ENDPOINT = (key) =>
-  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL_ID}:generateContent?key=${encodeURIComponent(key)}`;
+// DM provider abstraction: Gemini (cloud) or Ollama (host's PC).
+// All Gemini calls happen in the host's browser; same for Ollama (browser →
+// localhost:11434). We pick which provider via localStorage on the host.
+const GEMINI_MODEL_ID = "gemini-2.5-flash";
+const GEMINI_ENDPOINT = (key) =>
+  `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL_ID}:generateContent?key=${encodeURIComponent(key)}`;
 
 const KEY_STORAGE = "jjk_rpg_gemini_key_v1";
+const PROVIDER_STORAGE = "jjk_rpg_provider_v1";       // "gemini" | "ollama"
+const OLLAMA_CFG_STORAGE = "jjk_rpg_ollama_cfg_v1";   // { url, model }
 
 export function loadStoredKey() {
   try { return localStorage.getItem(KEY_STORAGE) || ""; } catch { return ""; }
@@ -15,6 +17,44 @@ export function saveKey(key) {
 }
 export function clearKey() {
   try { localStorage.removeItem(KEY_STORAGE); } catch {}
+}
+
+export function loadStoredProvider() {
+  try { return localStorage.getItem(PROVIDER_STORAGE) || "gemini"; } catch { return "gemini"; }
+}
+export function saveProvider(p) {
+  try { localStorage.setItem(PROVIDER_STORAGE, p); } catch {}
+}
+
+const OLLAMA_DEFAULTS = { url: "http://localhost:11434", model: "qwen2.5:14b" };
+export function loadOllamaConfig() {
+  try {
+    const raw = localStorage.getItem(OLLAMA_CFG_STORAGE);
+    if (!raw) return { ...OLLAMA_DEFAULTS };
+    const cfg = JSON.parse(raw);
+    return {
+      url: (cfg.url || OLLAMA_DEFAULTS.url).replace(/\/+$/, ""),
+      model: cfg.model || OLLAMA_DEFAULTS.model,
+    };
+  } catch { return { ...OLLAMA_DEFAULTS }; }
+}
+export function saveOllamaConfig({ url, model }) {
+  try {
+    localStorage.setItem(OLLAMA_CFG_STORAGE, JSON.stringify({
+      url: (url || OLLAMA_DEFAULTS.url).replace(/\/+$/, ""),
+      model: model || OLLAMA_DEFAULTS.model,
+    }));
+  } catch {}
+}
+
+// Whether the host has the bare-minimum config to run a DM call.
+export function hostHasDmProvider() {
+  const provider = loadStoredProvider();
+  if (provider === "ollama") {
+    const c = loadOllamaConfig();
+    return Boolean(c.url && c.model);
+  }
+  return Boolean(loadStoredKey());
 }
 
 // ─────────────── DM system prompt ───────────────
@@ -191,7 +231,7 @@ export async function callGemini({ apiKey, systemPrompt, userMessage, history = 
     ],
   };
 
-  const res = await fetch(ENDPOINT(apiKey), {
+  const res = await fetch(GEMINI_ENDPOINT(apiKey), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -208,10 +248,60 @@ export async function callGemini({ apiKey, systemPrompt, userMessage, history = 
   }
 
   const text = data.candidates?.[0]?.content?.parts?.map((p) => p.text).join("") ?? "";
-  if (!text) {
-    throw new Error("Gemini returned an empty response.");
-  }
+  if (!text) throw new Error("Gemini returned an empty response.");
   return text;
+}
+
+// ─────────────── Calling Ollama (local) ───────────────
+export async function callOllama({ url, model, systemPrompt, userMessage, jsonMode = false }) {
+  if (!url) throw new Error("Missing Ollama URL.");
+  if (!model) throw new Error("Missing Ollama model.");
+  const endpoint = url.replace(/\/+$/, "") + "/api/chat";
+
+  const body = {
+    model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage },
+    ],
+    stream: false,
+    options: { temperature: 0.85, num_ctx: 8192 },
+  };
+  if (jsonMode) body.format = "json";
+
+  let res;
+  try {
+    res = await fetch(endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch (e) {
+    throw new Error(`Ollama unreachable at ${endpoint} — is 'ollama serve' running on the host's PC? (${e.message})`);
+  }
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`Ollama error ${res.status}: ${text.slice(0, 400)}`);
+  }
+  const data = await res.json();
+  const content = data?.message?.content;
+  if (!content) throw new Error("Ollama returned an empty response.");
+  return content;
+}
+
+// ─────────────── Provider dispatcher ───────────────
+// All in-game DM calls go through this. It picks the provider from
+// localStorage (host-only — joiners never call this).
+export async function callDm({ systemPrompt, userMessage, jsonMode = false }) {
+  const provider = loadStoredProvider();
+  if (provider === "ollama") {
+    const cfg = loadOllamaConfig();
+    return callOllama({ ...cfg, systemPrompt, userMessage, jsonMode });
+  }
+  const apiKey = loadStoredKey();
+  if (!apiKey) throw new Error("Missing Gemini API key.");
+  return callGemini({ apiKey, systemPrompt, userMessage });
 }
 
 // Helper used inside buildTurnUserMessage.
@@ -258,12 +348,12 @@ ABILITY RULES
 
 Output ONLY the JSON object. No markdown, no commentary.`;
 
-export async function generateAbilities({ apiKey, technique, grade }) {
+export async function generateAbilities({ technique, grade }) {
   const userMsg = `Sorcerer grade: ${grade || "Grade 3"}\nCursed technique:\n"""\n${(technique || "").trim() || "(undeclared technique — invent something generic)"}\n"""`;
-  const raw = await callGemini({
-    apiKey,
+  const raw = await callDm({
     systemPrompt: ABILITY_GEN_PROMPT,
     userMessage: userMsg,
+    jsonMode: true, // Ollama: force pure JSON output. Gemini ignores this.
   });
 
   // Try to parse — strip code fences if present.

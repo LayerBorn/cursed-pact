@@ -371,6 +371,38 @@ button.link {
 .key-gate-actions button { width: auto; margin: 0; }
 .dot-sep { margin: 0 4px; color: var(--border); }
 
+/* ─────────────── Provider tabs ─────────────── */
+.provider-tabs {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  background: var(--surface2);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.provider-tab {
+  flex: 1;
+  margin: 0;
+  padding: 8px 10px;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.provider-tab input { display: none; }
+.provider-tab:has(input:checked) {
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.provider-panel { text-align: left; }
+.provider-panel input { margin-top: 4px; }
+#ollama-test { width: auto; margin-top: 8px; }
+
 /* ─────────────── Char counters ─────────────── */
 .char-counter {
   font-size: 0.7rem;

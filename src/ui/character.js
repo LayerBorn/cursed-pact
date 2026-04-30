@@ -1,7 +1,7 @@
 import { $, show, toast, el } from "./common.js";
 import { STARTER_TECHNIQUES, buildCharacter } from "../game/character.js";
 import { addPlayer, currentUid, listenRoom } from "../firebase.js";
-import { generateAbilities, loadStoredKey } from "../gemini.js";
+import { generateAbilities, hostHasDmProvider } from "../gemini.js";
 import { findProfanity } from "../util/profanity.js";
 
 let unsubscribeLockedGradeWatch = null;
@@ -76,24 +76,20 @@ export function initCharacter({ onJoined }) {
     const isHost = !!window.__app.isHost;
     let abilities = [];
     let aiStats = null;
-    if (isHost) {
-      const apiKey = loadStoredKey();
-      if (apiKey) {
-        submitBtn.textContent = "Generating abilities & stats…";
-        try {
-          const result = await generateAbilities({
-            apiKey,
-            technique: baseCharacter.technique,
-            grade: baseCharacter.grade,
-          });
-          abilities = result.abilities || [];
-          aiStats = result.stats || null;
-        } catch (err) {
-          console.warn("Ability generation failed:", err);
-          toast(`Couldn't generate abilities (${err.message}). Joining anyway.`, "warn");
-        }
+    if (isHost && hostHasDmProvider()) {
+      submitBtn.textContent = "Generating abilities & stats…";
+      try {
+        const result = await generateAbilities({
+          technique: baseCharacter.technique,
+          grade: baseCharacter.grade,
+        });
+        abilities = result.abilities || [];
+        aiStats = result.stats || null;
+      } catch (err) {
+        console.warn("Ability generation failed:", err);
+        toast(`Couldn't generate abilities (${err.message}). Joining anyway.`, "warn");
       }
-    } else {
+    } else if (!isHost) {
       submitBtn.textContent = "Joining…";
     }
 

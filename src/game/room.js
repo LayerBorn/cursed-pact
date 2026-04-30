@@ -11,10 +11,10 @@ import {
 import { applyMechanicsToCharacter, summarizeChange, rollWithStat, formatRoll } from "./combat.js";
 import {
   buildTurnUserMessage,
-  callGemini,
+  callDm,
   DM_SYSTEM_PROMPT,
   parseDmResponse,
-  loadStoredKey,
+  hostHasDmProvider,
   generateAbilities,
 } from "../gemini.js";
 
@@ -59,7 +59,7 @@ export async function submitPlayerAction({ roomCode, uid, name, content, rolls =
 
 // Re-fetch the room state (passed via callback so we don't import firebase get
 // at module scope unnecessarily). The host always passes the latest snapshot in.
-async function callDmOnce({ roomCode, room, hostUid, apiKey }) {
+async function callDmOnce({ roomCode, room, hostUid }) {
   const messages = messagesArray(room.messages).slice(-30);
   const userMsg = buildTurnUserMessage(
     room.players,
@@ -69,8 +69,7 @@ async function callDmOnce({ roomCode, room, hostUid, apiKey }) {
     hostUid
   );
 
-  const raw = await callGemini({
-    apiKey,
+  const raw = await callDm({
     systemPrompt: DM_SYSTEM_PROMPT,
     userMessage: userMsg,
   });
@@ -109,13 +108,12 @@ async function autoRollAndPost({ roomCode, room, needsRoll }) {
 const MAX_CHAIN = 4;
 
 export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
-  const apiKey = loadStoredKey();
-  if (!apiKey) {
+  if (!hostHasDmProvider()) {
     await postMessage(roomCode, {
       author: "system",
       authorName: "system",
       type: "system",
-      content: "Host has no Gemini API key set; DM is silent.",
+      content: "Host has no DM provider configured; DM is silent.",
     });
     return;
   }
@@ -133,7 +131,7 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
   for (let i = 0; i < MAX_CHAIN; i++) {
     let result;
     try {
-      result = await callDmOnce({ roomCode, room, hostUid, apiKey });
+      result = await callDmOnce({ roomCode, room, hostUid });
     } catch (err) {
       await postMessage(roomCode, {
         author: "system",
@@ -257,8 +255,7 @@ export function shouldRunDmTurn(room) {
 // and failures as system messages so the host (and players) can see what
 // happened instead of having to open the console.
 export async function generateMissingAbilities({ roomCode, room }) {
-  const apiKey = loadStoredKey();
-  if (!apiKey) return;
+  if (!hostHasDmProvider()) return;
   const players = Object.values(room.players || {});
   for (const p of players) {
     const c = p.character;
@@ -266,25 +263,24 @@ export async function generateMissingAbilities({ roomCode, room }) {
     const tech = (c.technique || "").trim();
     const hasAbilities = Array.isArray(c.abilities) && c.abilities.length > 0;
     if (!tech || tech === "(undeclared technique)" || hasAbilities) continue;
-    await generateAbilitiesForPlayer({ roomCode, player: p, apiKey });
+    await generateAbilitiesForPlayer({ roomCode, player: p });
   }
 }
 
 // Host-only: regenerate abilities for a specific player on demand. Used by
 // the regenerate button on the party panel.
 export async function regenerateForPlayer({ roomCode, player }) {
-  const apiKey = loadStoredKey();
-  if (!apiKey) {
+  if (!hostHasDmProvider()) {
     await postMessage(roomCode, {
       author: "system", authorName: "system", type: "system",
-      content: "Cannot regenerate — host has no Gemini API key set.",
+      content: "Cannot regenerate — host has no DM provider configured.",
     });
     return;
   }
-  await generateAbilitiesForPlayer({ roomCode, player, apiKey, forced: true });
+  await generateAbilitiesForPlayer({ roomCode, player, forced: true });
 }
 
-async function generateAbilitiesForPlayer({ roomCode, player, apiKey, forced = false }) {
+async function generateAbilitiesForPlayer({ roomCode, player, forced = false }) {
   const c = player.character || {};
   const tech = (c.technique || "").trim();
   if (!tech || tech === "(undeclared technique)") {
@@ -298,7 +294,6 @@ async function generateAbilitiesForPlayer({ roomCode, player, apiKey, forced = f
   }
   try {
     const { abilities, stats } = await generateAbilities({
-      apiKey,
       technique: tech,
       grade: c.grade,
     });
