@@ -1,0 +1,25 @@
+# Secrets — never commit these
+.env
+.env.local
+.env.*.local
+secrets.*
+*.secret
+*.secrets
+*.key
+*.pem
+
+# Per-user override of Firebase config, if you make a separate copy
+src/firebase.config.local.js
+
+# Node / build
+node_modules/
+dist/
+.cache/
+.parcel-cache/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

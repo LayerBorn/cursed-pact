@@ -1,0 +1,166 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cursed Pact — A JJK Text-Adventure RPG</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+  <main id="app">
+    <!-- Toast container -->
+    <div id="toasts" aria-live="polite"></div>
+
+    <!-- ============ API KEY GATE ============ -->
+    <section id="view-key" class="view active">
+      <div class="card centered">
+        <h1 class="title">Cursed Pact</h1>
+        <p class="subtitle">A multiplayer Jujutsu Kaisen text-adventure RPG, run by Gemini.</p>
+        <div class="divider"></div>
+        <h2>Gemini API key</h2>
+        <p class="muted">
+          Paste your own Google Gemini API key. It is stored only in your browser's localStorage —
+          never sent anywhere except directly to Google's API. <strong>Never share your key.</strong>
+        </p>
+        <p class="muted small">
+          Get a free key at
+          <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>.
+        </p>
+        <input id="key-input" type="password" placeholder="AIza..." autocomplete="off" spellcheck="false" />
+        <label class="checkbox">
+          <input type="checkbox" id="key-show" /> Show key
+        </label>
+        <button id="key-save" class="primary">Save &amp; continue</button>
+        <p id="key-status" class="muted small"></p>
+      </div>
+    </section>
+
+    <!-- ============ LOBBY ============ -->
+    <section id="view-lobby" class="view">
+      <div class="card centered">
+        <h1 class="title">Cursed Pact</h1>
+        <p class="subtitle muted">Form a party of jujutsu sorcerers. The DM is an AI.</p>
+        <div class="divider"></div>
+
+        <div class="lobby-grid">
+          <div class="lobby-half">
+            <h2>Create a room</h2>
+            <p class="muted small">You'll be the host. Only the host's browser calls Gemini.</p>
+            <button id="btn-create" class="primary">Create room</button>
+          </div>
+          <div class="vsep"></div>
+          <div class="lobby-half">
+            <h2>Join a room</h2>
+            <input id="join-code" type="text" placeholder="ROOM CODE" maxlength="6" autocomplete="off" />
+            <button id="btn-join" class="secondary">Join</button>
+          </div>
+        </div>
+
+        <div class="divider"></div>
+        <p class="muted small">
+          You are signed in anonymously as
+          <code id="lobby-uid">…</code>.
+          <button id="btn-change-key" class="link">Change API key</button>
+        </p>
+      </div>
+    </section>
+
+    <!-- ============ CHARACTER CREATION ============ -->
+    <section id="view-character" class="view">
+      <div class="card">
+        <h1 class="title">Choose your sorcerer</h1>
+        <p class="muted">Room <code id="char-room-code">—</code></p>
+        <div class="divider"></div>
+
+        <label>Name
+          <input id="char-name" type="text" maxlength="32" placeholder="Yuji Itadori" />
+        </label>
+
+        <label>Starting grade
+          <select id="char-grade">
+            <option value="Grade 4">Grade 4 (rookie)</option>
+            <option value="Grade 3" selected>Grade 3 (default)</option>
+            <option value="Grade 2">Grade 2</option>
+            <option value="Grade 1">Grade 1</option>
+            <option value="Semi-Grade 1">Semi-Grade 1</option>
+            <option value="Special Grade">Special Grade (be careful)</option>
+          </select>
+        </label>
+
+        <label>Cursed technique
+          <textarea id="char-technique" rows="3" placeholder="Describe your technique freely, or pick one below."></textarea>
+        </label>
+
+        <div class="technique-picker" id="technique-picker"></div>
+
+        <div class="stats-grid">
+          <label>Physical (STR)
+            <input id="stat-phys" type="number" min="1" max="20" value="12" />
+          </label>
+          <label>Technique (AGI/INT)
+            <input id="stat-tech" type="number" min="1" max="20" value="12" />
+          </label>
+          <label>Spirit (CE control)
+            <input id="stat-spirit" type="number" min="1" max="20" value="12" />
+          </label>
+        </div>
+        <p class="muted small">Distribute as you wish. Most starters average 12 per stat. (1d20 + (stat-10)/2 modifier on rolls.)</p>
+
+        <label class="optional">Domain expansion <span class="muted small">(optional, may stay locked)</span>
+          <textarea id="char-domain" rows="2" placeholder="e.g. Malevolent Shrine — a domain that does not need a barrier..."></textarea>
+        </label>
+
+        <button id="char-submit" class="primary">Enter the room</button>
+      </div>
+    </section>
+
+    <!-- ============ GAME ROOM ============ -->
+    <section id="view-game" class="view">
+      <header class="game-header">
+        <div>
+          <h1 class="title small">Cursed Pact</h1>
+          <p class="muted small">
+            Room <code id="game-room-code">—</code>
+            <span id="game-host-badge" class="badge hidden">HOST</span>
+            <span id="game-turn-badge" class="badge accent hidden">YOUR TURN</span>
+          </p>
+        </div>
+        <div class="game-header-actions">
+          <button id="btn-leave" class="ghost small">Leave</button>
+        </div>
+      </header>
+
+      <div class="game-layout">
+        <aside class="party-panel">
+          <h2>Party</h2>
+          <div id="party-list"></div>
+        </aside>
+
+        <section class="chat-area">
+          <div id="chat-log" class="chat-log"></div>
+
+          <div class="dice-tray hidden" id="dice-tray">
+            <p class="muted small" id="dice-prompt">The DM asks for a roll.</p>
+            <button id="btn-roll" class="primary">Roll d20</button>
+          </div>
+
+          <form id="action-form" class="action-form">
+            <textarea id="action-input" rows="2" placeholder="Describe what your sorcerer does…"></textarea>
+            <div class="action-row">
+              <button type="button" id="btn-quick-roll" class="ghost small" title="Roll a d20">d20</button>
+              <button type="submit" id="btn-send" class="primary">Send</button>
+            </div>
+          </form>
+        </section>
+      </div>
+    </section>
+  </main>
+
+  <!-- Markdown renderer (small, no eval) -->
+  <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
