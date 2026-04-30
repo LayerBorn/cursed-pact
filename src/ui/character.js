@@ -51,23 +51,27 @@ export function initCharacter({ onJoined }) {
     submitBtn.disabled = true;
     const originalLabel = submitBtn.textContent;
 
-    const apiKey = loadStoredKey();
+    // Only the HOST ever calls Gemini — for the DM and for ability generation.
+    // Joiners save their character with empty abilities and the host backfills
+    // them later (see generateMissingAbilities in game/room.js).
+    const isHost = !!window.__app.isHost;
     let abilities = [];
-    if (apiKey) {
-      // Host (or any keyed player): generate abilities locally.
-      submitBtn.textContent = "Generating abilities…";
-      try {
-        abilities = await generateAbilities({
-          apiKey,
-          technique: baseCharacter.technique,
-          grade: baseCharacter.grade,
-        });
-      } catch (err) {
-        console.warn("Ability generation failed:", err);
-        toast(`Couldn't generate abilities (${err.message}). Joining anyway — host can regenerate.`, "warn");
+    if (isHost) {
+      const apiKey = loadStoredKey();
+      if (apiKey) {
+        submitBtn.textContent = "Generating abilities…";
+        try {
+          abilities = await generateAbilities({
+            apiKey,
+            technique: baseCharacter.technique,
+            grade: baseCharacter.grade,
+          });
+        } catch (err) {
+          console.warn("Ability generation failed:", err);
+          toast(`Couldn't generate abilities (${err.message}). Joining anyway.`, "warn");
+        }
       }
     } else {
-      // No key — host's browser will generate abilities for us.
       submitBtn.textContent = "Joining…";
     }
 
@@ -77,7 +81,7 @@ export function initCharacter({ onJoined }) {
       await addPlayer(roomCode, currentUid(), character);
       if (abilities.length) {
         toast(`Abilities: ${abilities.map((a) => a.name).join(", ")}`, "ok");
-      } else if (!apiKey) {
+      } else if (!isHost) {
         toast("Joined. Abilities will appear once the host generates them.", "ok");
       }
       onJoined(roomCode);
