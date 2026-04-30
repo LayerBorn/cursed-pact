@@ -261,6 +261,107 @@ button.link {
 }
 .objective-text { color: var(--text); }
 
+/* ─────────────── Scene map ─────────────── */
+.map-container {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.map-title {
+  font-size: 0.78rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+.map-grid {
+  display: grid;
+  gap: 1px;
+  background: var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  width: 100%;
+  margin-bottom: 8px;
+}
+.map-cell {
+  background: var(--surface3);
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 0;
+}
+.map-token {
+  position: absolute;
+  inset: 8%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: white;
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.6);
+  cursor: help;
+}
+.map-token.kind-player  { background: linear-gradient(135deg, #5ee0a6, #2bbd87); }
+.map-token.kind-ally    { background: linear-gradient(135deg, #6fb5ff, #2e7bd6); }
+.map-token.kind-enemy   { background: linear-gradient(135deg, #ff7b8a, #d63346); }
+.map-token.kind-boss    { background: linear-gradient(135deg, #b03cff, #6e21b8); border-color: var(--accent2); box-shadow: 0 0 6px var(--accent-glow); }
+.map-token.kind-feature { background: linear-gradient(135deg, #5a5570, #3a3550); }
+.map-token.me { box-shadow: 0 0 0 2px var(--good), 0 0 10px rgba(94, 224, 166, 0.6); }
+
+.map-legend {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 0.72rem;
+}
+.map-legend-row { display: flex; align-items: center; gap: 6px; color: var(--muted); }
+.map-legend-dot {
+  width: 9px; height: 9px; border-radius: 50%;
+  flex-shrink: 0;
+}
+.map-legend-dot.kind-player  { background: #5ee0a6; }
+.map-legend-dot.kind-ally    { background: #6fb5ff; }
+.map-legend-dot.kind-enemy   { background: #ff7b8a; }
+.map-legend-dot.kind-boss    { background: #b03cff; }
+.map-legend-dot.kind-feature { background: #5a5570; }
+
+/* ─────────────── Waiting room ─────────────── */
+.waiting-room {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  gap: 18px;
+  padding: 32px 24px;
+  text-align: center;
+}
+.waiting-room.hidden { display: none; }
+.waiting-room .title { font-size: 1.6rem; }
+.waiting-room code {
+  font-size: 1.4rem;
+  letter-spacing: 0.1em;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  padding: 4px 12px;
+  border-radius: 6px;
+  color: var(--accent2);
+}
+.waiting-status {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 16px;
+  max-width: 100%;
+  word-wrap: break-word;
+}
+.waiting-room button.primary { max-width: 320px; }
+
 .party-status { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
 .status-tag {
   font-size: 0.7rem; padding: 2px 6px; border-radius: 4px;

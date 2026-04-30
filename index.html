@@ -137,9 +137,22 @@
         <aside class="party-panel">
           <h2>Party</h2>
           <div id="party-list"></div>
+          <div id="map-container" class="map-container hidden"></div>
         </aside>
 
         <section class="chat-area">
+          <!-- Pre-game waiting room: visible until campaign begins -->
+          <div id="waiting-room" class="waiting-room hidden">
+            <h2 class="title">Waiting room</h2>
+            <p class="muted">
+              Share room code <code id="waiting-room-code">—</code> with friends.
+              Once everyone has built their sorcerer, the host clicks <strong>Start campaign</strong> to begin.
+            </p>
+            <div id="waiting-status" class="waiting-status muted small"></div>
+            <button id="btn-start-campaign" class="primary hidden">Start campaign</button>
+            <p id="waiting-non-host" class="muted small hidden">Waiting for the host to start…</p>
+          </div>
+
           <div id="chat-log" class="chat-log"></div>
 
           <div class="dice-tray hidden" id="dice-tray">

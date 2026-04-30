@@ -29,6 +29,20 @@ export function initGame({ onLeave }) {
     await sendAction();
   });
 
+  $("#btn-start-campaign").addEventListener("click", async () => {
+    const btn = $("#btn-start-campaign");
+    btn.disabled = true;
+    btn.textContent = "Starting…";
+    try {
+      await triggerCampaignStart({ roomCode });
+    } catch (err) {
+      console.error(err);
+      toast(`Couldn't start: ${err.message}`, "error");
+      btn.disabled = false;
+      btn.textContent = "Start campaign";
+    }
+  });
+
   // Hide the now-vestigial dice buttons — auto-roll handles checks.
   const tray = $("#dice-tray");
   if (tray) tray.classList.add("hidden");
@@ -76,24 +90,7 @@ export function joinRoom({ code, host }) {
     lastRoom = room;
     renderRoom(room);
 
-    // Host: kick the campaign off once we've registered our own character.
-    if (isHost && !campaignStartTriggered) {
-      const hostUid = currentUid();
-      const msgs = Object.values(room.messages || {});
-      const hasCampaignMsg = msgs.some((m) => m && m.type === "system" && /Campaign begins/i.test(m.content || ""));
-      const hostHasCharacter = room.players && room.players[hostUid];
-      if (hostHasCharacter && !hasCampaignMsg) {
-        campaignStartTriggered = true;
-        triggerCampaignStart({ roomCode: code }).catch((err) => {
-          console.error("Failed to start campaign:", err);
-          campaignStartTriggered = false;
-        });
-      } else if (hasCampaignMsg) {
-        campaignStartTriggered = true;
-      }
-    }
-
-    // Host orchestrates DM turns.
+    // Host orchestrates DM turns once the campaign is started.
     if (isHost && !dmRunning && shouldRunDmTurn(room)) {
       dmRunning = true;
       runDmTurn({ roomCode: code, room, hostUid: currentUid() })
@@ -122,10 +119,119 @@ function leaveRoom() {
 }
 
 function renderRoom(room) {
+  renderWaitingRoom(room);
   renderObjective(room);
   renderParty(room);
+  renderMap(room);
   renderMessages(room);
   renderTurnState(room);
+}
+
+function renderWaitingRoom(room) {
+  const msgs = Object.values(room.messages || {});
+  const hasCampaignMsg = msgs.some((m) => m && m.type === "system" && /Campaign begins/i.test(m.content || ""));
+  const players = Object.values(room.players || {});
+  const ready = players.length;
+  const me = currentUid();
+  const myselfIn = !!room.players?.[me];
+
+  const waitingRoom = $("#waiting-room");
+  const chatLog = $("#chat-log");
+  const actionForm = $("#action-form");
+  const startBtn = $("#btn-start-campaign");
+  const nonHost = $("#waiting-non-host");
+
+  if (hasCampaignMsg) {
+    // Game in progress — hide waiting UI, show chat and action form.
+    waitingRoom.classList.add("hidden");
+    chatLog.classList.remove("hidden");
+    actionForm.classList.remove("hidden");
+    return;
+  }
+
+  // Pre-game state: show waiting room, hide chat + input.
+  waitingRoom.classList.remove("hidden");
+  chatLog.classList.add("hidden");
+  actionForm.classList.add("hidden");
+
+  $("#waiting-room-code").textContent = roomCode || "—";
+
+  // Roster of players already in the lobby.
+  const status = $("#waiting-status");
+  if (!ready) {
+    status.textContent = "No sorcerers yet. Build yours.";
+  } else {
+    const names = players.map((p) => `${p.character?.name || p.name || "?"} (${p.character?.grade || "?"})`).join(" · ");
+    status.textContent = `${ready} sorcerer${ready === 1 ? "" : "s"} ready: ${names}`;
+  }
+
+  // Host: show start button (disabled until at least one sorcerer is registered).
+  if (isHost) {
+    startBtn.classList.remove("hidden");
+    startBtn.disabled = ready < 1 || !myselfIn;
+    if (ready < 1) startBtn.textContent = "Waiting for sorcerers…";
+    else if (!myselfIn) startBtn.textContent = "Build your sorcerer first";
+    else startBtn.textContent = `Start campaign (${ready})`;
+    nonHost.classList.add("hidden");
+  } else {
+    startBtn.classList.add("hidden");
+    nonHost.classList.remove("hidden");
+  }
+}
+
+function renderMap(room) {
+  const container = $("#map-container");
+  const map = room.map;
+  if (!map || !Array.isArray(map.tokens) || !Array.isArray(map.size)) {
+    container.classList.add("hidden");
+    container.innerHTML = "";
+    return;
+  }
+  container.classList.remove("hidden");
+  const [cols, rows] = map.size;
+  const me = currentUid();
+
+  // Title
+  container.innerHTML = "";
+  const title = el("div", { class: "map-title" }, escapeHtml(map.scene || "Scene"));
+  container.appendChild(title);
+
+  // Grid
+  const grid = el("div", {
+    class: "map-grid",
+    style: `grid-template-columns: repeat(${cols}, 1fr); aspect-ratio: ${cols} / ${rows};`,
+  });
+  // Empty cells first.
+  for (let i = 0; i < cols * rows; i++) {
+    grid.appendChild(el("div", { class: "map-cell" }));
+  }
+  container.appendChild(grid);
+
+  // Tokens overlay positioned absolutely inside the grid.
+  for (const t of map.tokens) {
+    const [c, r] = t.pos;
+    if (c < 0 || c >= cols || r < 0 || r >= rows) continue;
+    const cellIdx = r * cols + c;
+    const cell = grid.children[cellIdx];
+    if (!cell) continue;
+    const isMe = t.kind === "player" && t.id === me;
+    const tokenLabel = (t.label || "?").slice(0, 2).toUpperCase();
+    const tok = el("div", {
+      class: `map-token kind-${t.kind || "feature"} ${isMe ? "me" : ""}`,
+      title: t.label || "",
+    }, tokenLabel);
+    cell.appendChild(tok);
+  }
+
+  // Legend
+  const legend = el("div", { class: "map-legend" });
+  for (const t of map.tokens) {
+    legend.appendChild(el("div", { class: "map-legend-row" }, [
+      el("span", { class: `map-legend-dot kind-${t.kind || "feature"}` }, ""),
+      el("span", { class: "map-legend-label" }, escapeHtml(t.label || "?")),
+    ]));
+  }
+  container.appendChild(legend);
 }
 
 function renderObjective(room) {

@@ -174,4 +174,8 @@ export async function setObjective(roomCode, objective) {
   await set(roomRef(roomCode, "objective"), objective || null);
 }
 
+export async function setMap(roomCode, map) {
+  await set(roomRef(roomCode, "map"), map || null);
+}
+
 export { ref, set, get, update };

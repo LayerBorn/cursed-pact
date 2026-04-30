@@ -6,6 +6,7 @@ import {
   setPendingAction,
   clearPendingActions,
   setObjective,
+  setMap,
 } from "../firebase.js";
 import { applyMechanicsToCharacter, summarizeChange, rollWithStat, formatRoll } from "./combat.js";
 import {
@@ -185,6 +186,26 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
     // Update objective if the DM set one.
     if (typeof mechanics?.objective === "string" && mechanics.objective.trim()) {
       try { await setObjective(roomCode, mechanics.objective.trim()); } catch {}
+    }
+
+    // Update the scene map if the DM provided one.
+    if (mechanics?.map && typeof mechanics.map === "object") {
+      const m = mechanics.map;
+      const cleaned = {
+        scene: typeof m.scene === "string" ? m.scene.slice(0, 200) : "",
+        size: Array.isArray(m.size) && m.size.length === 2
+          ? [Math.max(2, Math.min(16, Number(m.size[0]) || 8)), Math.max(2, Math.min(12, Number(m.size[1]) || 5))]
+          : [8, 5],
+        tokens: Array.isArray(m.tokens)
+          ? m.tokens.slice(0, 30).filter((t) => t && Array.isArray(t.pos) && t.pos.length === 2).map((t) => ({
+              id: String(t.id || "").slice(0, 64),
+              label: String(t.label || "?").slice(0, 24),
+              kind: ["player", "ally", "enemy", "boss", "feature"].includes(t.kind) ? t.kind : "feature",
+              pos: [Math.max(0, Math.min(15, Number(t.pos[0]) || 0)), Math.max(0, Math.min(11, Number(t.pos[1]) || 0))],
+            }))
+          : [],
+      };
+      try { await setMap(roomCode, cleaned); } catch {}
     }
 
     // If a roll is needed, auto-roll and chain the next call.

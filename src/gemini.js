@@ -65,6 +65,15 @@ ROLLS
 - The action log will contain entries like \`[ROLL d20: 14, +2 Technique mod = 16]\`. Use them: 1 = critical fumble, 20 = critical success, total >= DC = success, total < DC = fail.
 - If a roll is needed and absent, set "needsRoll" in the JSON; narration should stop at the moment of decision.
 
+SCENE MAP
+- Maintain a tiny tactical map in the JSON whenever positions matter (combat, sneaking, exploration, multi-room scenes). The frontend renders it as a small grid; the players need it to know where they are relative to threats and each other.
+- Map grid sizes are small: typical 8×5 (cols × rows), use 6×4 for tight rooms and 12×6 for outdoor scenes.
+- Coordinates are [col, row], 0-indexed from top-left.
+- Token "id" MUST be the player's uid for player tokens (so the renderer can highlight "you"). Use any short string id for enemies, NPCs, and features.
+- Token "kind" is one of: "player", "ally", "enemy", "boss", "feature".
+- Re-emit the WHOLE map every turn the layout changes; if positions are unchanged you may omit "map".
+- On the opening turn, you do NOT have to include a map until the players actually arrive at the location.
+
 OUTPUT FORMAT (CRITICAL)
 - First, write the in-character DM narration using markdown. NPC dialogue, action, sensory detail.
 - Then, on a NEW LINE, write a single JSON code fence containing the mechanical state update. NO commentary inside or after the fence. Use this exact shape:
@@ -84,7 +93,17 @@ OUTPUT FORMAT (CRITICAL)
   "needsRoll": { "playerId": "<uid>", "stat": "Technique", "dc": 15, "reason": "dodge the ichor lance" },
   "nextTurn": "<uid>",
   "objective": "exorcise the Grade 2 curse haunting the school",
-  "sceneSummary": "one-line summary of the scene's current beat"
+  "sceneSummary": "one-line summary of the scene's current beat",
+  "map": {
+    "scene": "abandoned hospital — 3rd-floor lobby",
+    "size": [8, 5],
+    "tokens": [
+      { "id": "<player-uid>", "label": "Yuji", "kind": "player", "pos": [2, 3] },
+      { "id": "<player-uid-2>", "label": "Megumi", "kind": "player", "pos": [3, 4] },
+      { "id": "curse1", "label": "Womb Curse", "kind": "enemy", "pos": [6, 2] },
+      { "id": "exit", "label": "Stairs", "kind": "feature", "pos": [7, 4] }
+    ]
+  }
 }
 \`\`\`
 
@@ -95,6 +114,7 @@ RULES FOR THE JSON
 - "nextTurn" must be a uid in the turnOrder. Cycle fairly so everyone acts. If "needsRoll" is set, "nextTurn" should be the SAME player you're rolling for (so they re-enter on the auto-rolled response).
 - "needsRoll" should ONLY be set when you are stopping to wait for a dice roll.
 - "objective" is the current mission goal in 5–10 words; SET IT on the opening turn and re-include it whenever the objective changes; otherwise omit.
+- "map" — see SCENE MAP above. Include whenever the scene or any token's position changed.
 - Never put narration inside the JSON. Never put JSON before the narration.
 
 TONE
