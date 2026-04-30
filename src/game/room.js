@@ -253,7 +253,9 @@ export function shouldRunDmTurn(room) {
 
 // Host-only: scan the party for any player whose character has a technique
 // but no abilities yet, and generate a set for them via Gemini. Runs one
-// player at a time to keep API quota predictable.
+// player at a time to keep API quota predictable. Surfaces both successes
+// and failures as system messages so the host (and players) can see what
+// happened instead of having to open the console.
 export async function generateMissingAbilities({ roomCode, room }) {
   const apiKey = loadStoredKey();
   if (!apiKey) return;
@@ -264,32 +266,68 @@ export async function generateMissingAbilities({ roomCode, room }) {
     const tech = (c.technique || "").trim();
     const hasAbilities = Array.isArray(c.abilities) && c.abilities.length > 0;
     if (!tech || tech === "(undeclared technique)" || hasAbilities) continue;
-    try {
-      const { abilities, stats } = await generateAbilities({
-        apiKey,
-        technique: tech,
-        grade: c.grade,
+    await generateAbilitiesForPlayer({ roomCode, player: p, apiKey });
+  }
+}
+
+// Host-only: regenerate abilities for a specific player on demand. Used by
+// the regenerate button on the party panel.
+export async function regenerateForPlayer({ roomCode, player }) {
+  const apiKey = loadStoredKey();
+  if (!apiKey) {
+    await postMessage(roomCode, {
+      author: "system", authorName: "system", type: "system",
+      content: "Cannot regenerate — host has no Gemini API key set.",
+    });
+    return;
+  }
+  await generateAbilitiesForPlayer({ roomCode, player, apiKey, forced: true });
+}
+
+async function generateAbilitiesForPlayer({ roomCode, player, apiKey, forced = false }) {
+  const c = player.character || {};
+  const tech = (c.technique || "").trim();
+  if (!tech || tech === "(undeclared technique)") {
+    if (forced) {
+      await postMessage(roomCode, {
+        author: "system", authorName: "system", type: "system",
+        content: `Cannot generate for ${c.name || "player"} — no technique described.`,
       });
-      if (abilities.length || stats) {
-        const updated = {
-          ...c,
-          ...(abilities.length ? { abilities } : {}),
-          ...(stats ? { stats } : {}),
-        };
-        await updatePlayerCharacter(roomCode, p.uid, updated);
-        const bits = [];
-        if (abilities.length) bits.push(`abilities: ${abilities.map((a) => a.name).join(", ")}`);
-        if (stats) bits.push(`stats: P${stats.phys}/T${stats.tech}/S${stats.spirit}`);
-        await postMessage(roomCode, {
-          author: "system",
-          authorName: "system",
-          type: "system",
-          content: `Generated for ${c.name} — ${bits.join(" · ")}`,
-        });
-      }
-    } catch (err) {
-      console.warn("Ability gen failed for", p.uid, err);
     }
+    return;
+  }
+  try {
+    const { abilities, stats } = await generateAbilities({
+      apiKey,
+      technique: tech,
+      grade: c.grade,
+    });
+    if (!abilities.length && !stats) {
+      await postMessage(roomCode, {
+        author: "system", authorName: "system", type: "system",
+        content: `Generation returned nothing for ${c.name}. Try regenerating.`,
+      });
+      return;
+    }
+    const updated = {
+      ...c,
+      ...(abilities.length ? { abilities } : {}),
+      ...(stats ? { stats } : {}),
+    };
+    await updatePlayerCharacter(roomCode, player.uid, updated);
+    const bits = [];
+    if (abilities.length) bits.push(`abilities: ${abilities.map((a) => a.name).join(", ")}`);
+    if (stats) bits.push(`stats: P${stats.phys}/T${stats.tech}/S${stats.spirit}`);
+    await postMessage(roomCode, {
+      author: "system", authorName: "system", type: "system",
+      content: `Generated for ${c.name} — ${bits.join(" · ")}`,
+    });
+  } catch (err) {
+    console.warn("Ability gen failed for", player.uid, err);
+    await postMessage(roomCode, {
+      author: "system", authorName: "system", type: "system",
+      content: `Could not generate abilities for ${c.name || "player"}: ${err.message}. Host can click ↻ on their card to retry.`,
+    });
   }
 }
 

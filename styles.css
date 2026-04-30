@@ -398,7 +398,8 @@ button.link {
   margin-bottom: 4px;
 }
 .party-name { display: flex; justify-content: space-between; align-items: center; gap: 6px; }
-.btn-kick {
+.party-host-actions { display: flex; gap: 4px; }
+.btn-kick, .btn-regen {
   background: transparent;
   border: 1px solid transparent;
   color: var(--muted);
@@ -412,6 +413,7 @@ button.link {
   cursor: pointer;
 }
 .btn-kick:hover { background: var(--danger); color: white; border-color: var(--danger); }
+.btn-regen:hover { background: var(--accent); color: white; border-color: var(--accent); }
 
 .party-card.inactive { opacity: 0.6; }
 .status-tag.warn { color: var(--warn); border-color: rgba(255, 184, 77, 0.3); }

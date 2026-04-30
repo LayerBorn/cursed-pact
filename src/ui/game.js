@@ -7,7 +7,7 @@ import {
   bumpLastSeen,
   kickPlayer,
 } from "../firebase.js";
-import { messagesArray, submitPlayerAction, runDmTurn, shouldRunDmTurn, triggerCampaignStart, generateMissingAbilities } from "../game/room.js";
+import { messagesArray, submitPlayerAction, runDmTurn, shouldRunDmTurn, triggerCampaignStart, generateMissingAbilities, regenerateForPlayer } from "../game/room.js";
 import { findProfanity } from "../util/profanity.js";
 
 const INACTIVE_AFTER_MS = 60 * 1000; // 1 minute of no heartbeat → "inactive"
@@ -356,9 +356,23 @@ function renderParty(room) {
       ]),
     ]);
 
-    // Host kick button (not for self).
+    // Host action buttons (not for self).
     if (isHost && p.uid !== me) {
-      nameRow.appendChild(el("button", {
+      const btnGroup = el("div", { class: "party-host-actions" });
+      btnGroup.appendChild(el("button", {
+        class: "btn-regen",
+        title: `Regenerate abilities & stats for ${c.name || "player"}`,
+        onclick: async () => {
+          try {
+            toast(`Regenerating for ${c.name}…`, "ok");
+            await regenerateForPlayer({ roomCode, player: p });
+          } catch (err) {
+            console.error(err);
+            toast(`Regenerate failed: ${err.message}`, "error");
+          }
+        },
+      }, "↻"));
+      btnGroup.appendChild(el("button", {
         class: "btn-kick",
         title: `Kick ${c.name || "player"}`,
         onclick: async () => {
@@ -372,6 +386,7 @@ function renderParty(room) {
           }
         },
       }, "✕"));
+      nameRow.appendChild(btnGroup);
     }
     card.appendChild(nameRow);
 
