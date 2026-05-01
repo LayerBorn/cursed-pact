@@ -1,4 +1,4 @@
-import { $, show, toast, el, escapeHtml, renderMarkdown } from "./common.js";
+import { $, show, toast, el, escapeHtml, renderMarkdown, copyToClipboard } from "./common.js";
 import {
   listenRoom,
   postMessage,
@@ -18,10 +18,12 @@ import {
   generateMissingAbilities,
   regenerateForPlayer,
   tallyVotes,
+  eligibleVoterUids,
+  nextTurnUid,
 } from "../game/room.js";
 import { findProfanity } from "../util/profanity.js";
 
-const INACTIVE_AFTER_MS = 60 * 1000;
+const INACTIVE_AFTER_MS = 3 * 60 * 1000; // 3 min — long enough that "thinking" doesn't trigger it
 const HEARTBEAT_MS = 25 * 1000;
 let heartbeatTimer = null;
 let inactivityRefreshTimer = null;
@@ -59,6 +61,17 @@ export function initGame({ onLeave }) {
     };
     actionInput.addEventListener("input", updateAC);
     updateAC();
+  }
+
+  // Copy room code buttons
+  for (const id of ["btn-copy-game-code", "btn-copy-waiting-code"]) {
+    const btn = document.getElementById(id);
+    if (!btn) continue;
+    btn.addEventListener("click", async () => {
+      if (!roomCode) return;
+      const ok = await copyToClipboard(roomCode);
+      toast(ok ? `Room code ${roomCode} copied` : "Couldn't copy — copy manually", ok ? "ok" : "warn");
+    });
   }
 
   $("#btn-start-campaign").addEventListener("click", async () => {
@@ -166,6 +179,7 @@ export function joinRoom({ code, host }) {
           content: winner.option.text,
           count: winner.count,
           total: winner.total,
+          optionId: winner.option.id,
         })
           .catch((err) => console.warn("Party action submit failed:", err))
           .finally(() => { voteResolveRunning = false; });
@@ -205,8 +219,9 @@ export function joinRoom({ code, host }) {
 
   if (inactivityRefreshTimer) clearInterval(inactivityRefreshTimer);
   inactivityRefreshTimer = setInterval(() => {
+    if (document.visibilityState !== "visible") return;
     if (lastRoom) renderParty(lastRoom);
-  }, 15 * 1000);
+  }, 30 * 1000);
 }
 
 function onVisibilityChange() {
@@ -328,6 +343,24 @@ function renderTurnBanner(room) {
     $("#turn-label").textContent = "TURN";
     $("#turn-name").textContent = curName || "—";
   }
+
+  // Up-next preview: who acts after the current turn.
+  const nextSlot = $("#turn-banner-next");
+  if (nextSlot) {
+    const next = nextTurnUid(room.turnOrder, cur);
+    if (next && next !== cur) {
+      const nextPlayer = room.players?.[next];
+      const nextName = nextPlayer?.character?.name || nextPlayer?.name || null;
+      if (nextName) {
+        nextSlot.classList.remove("hidden");
+        nextSlot.textContent = `Up next: ${nextName}`;
+      } else {
+        nextSlot.classList.add("hidden");
+      }
+    } else {
+      nextSlot.classList.add("hidden");
+    }
+  }
 }
 
 function renderActionPrompt(room) {
@@ -351,10 +384,10 @@ function renderActionPrompt(room) {
     modeLabel.textContent = "Party vote — choose one";
     panel.classList.add("group");
     panel.classList.remove("individual", "spectator");
-    const onlineUids = Object.keys(room.players || {});
+    const eligible = eligibleVoterUids(room);
     const votes = room.votes || {};
-    const cast = onlineUids.filter((u) => votes[u]).length;
-    tally.textContent = `${cast} / ${onlineUids.length} voted`;
+    const cast = eligible.filter((u) => votes[u]).length;
+    tally.textContent = `${cast} / ${eligible.length} voted`;
   } else {
     panel.classList.remove("group", "spectator");
     panel.classList.add("individual");
@@ -611,10 +644,14 @@ function isInactive(player, now) {
   return now - ls > INACTIVE_AFTER_MS;
 }
 
+const MAX_TRACKED_MSG_IDS = 1000;
 function renderMessages(room) {
   const log = $("#chat-log");
   const msgs = messagesArray(room.messages);
   const me = currentUid();
+  // Capture scroll position BEFORE we append so we can decide whether to
+  // auto-scroll. If the user scrolled up to read history, leave them be.
+  const wasAtBottom = log.scrollHeight - log.clientHeight - log.scrollTop < 60;
   let appended = false;
   for (const m of msgs) {
     if (renderedMessageIds.has(m.id)) continue;
@@ -623,7 +660,12 @@ function renderMessages(room) {
     const node = renderMessageNode(m, me);
     log.appendChild(node);
   }
-  if (appended) log.scrollTop = log.scrollHeight;
+  if (appended && wasAtBottom) log.scrollTop = log.scrollHeight;
+  // Trim the rendered-id set so a long campaign doesn't leak memory.
+  if (renderedMessageIds.size > MAX_TRACKED_MSG_IDS) {
+    const arr = Array.from(renderedMessageIds);
+    renderedMessageIds = new Set(arr.slice(-MAX_TRACKED_MSG_IDS / 2));
+  }
 }
 
 function renderMessageNode(m, me) {

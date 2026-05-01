@@ -200,7 +200,6 @@ export function buildTurnUserMessage(party, turnOrder, currentTurnUid, recentMes
       `  status: ${(c.statusEffects && c.statusEffects.length) ? c.statusEffects.join(", ") : "(none)"}`,
       `  items: ${(c.items && c.items.length) ? c.items.join(", ") : "(none)"}`,
       `  domain: ${c.domain || "(none / locked)"}`,
-      `  online: ${p.online ? "yes" : "no"}`,
     ].join("\n");
   }).join("\n");
 
@@ -393,12 +392,15 @@ export async function generateAbilities({ technique, grade }) {
   }
 
   const abilities = Array.isArray(parsed.abilities) ? parsed.abilities : [];
+  // Cap cost at 80 — even our biggest grade has ~220 CE; an 80-cost finisher is
+  // the cinematic ceiling. Anything pricier should be a domain expansion, which
+  // is described separately and not in this list.
   const cleanedAbilities = abilities
     .filter((a) => a && typeof a.name === "string" && typeof a.effect === "string")
     .slice(0, 4)
     .map((a) => ({
       name: String(a.name).slice(0, 40),
-      cost: Number.isFinite(Number(a.cost)) ? Math.max(0, Math.min(200, Math.round(Number(a.cost)))) : 10,
+      cost: Number.isFinite(Number(a.cost)) ? Math.max(0, Math.min(80, Math.round(Number(a.cost)))) : 10,
       effect: String(a.effect).slice(0, 200),
     }));
 
@@ -420,20 +422,56 @@ export async function generateAbilities({ technique, grade }) {
 }
 
 // ─────────────── Parsing the DM response ───────────────
-// Splits out the trailing JSON fence (if any) and returns { narration, mechanics }.
+// Returns { narration, mechanics }. Tries three formats in order:
+//   1. ```json ... ``` fence (preferred — what the system prompt asks for)
+//   2. ``` ... ``` plain fence
+//   3. Bare {...} block at the END of the response (fallback for small models
+//      that drop the fence but still produce JSON)
 export function parseDmResponse(raw) {
-  const fenceRegex = /```json\s*([\s\S]*?)\s*```/i;
-  const match = raw.match(fenceRegex);
-  let narration = raw;
-  let mechanics = null;
-  if (match) {
-    narration = raw.slice(0, match.index).trim();
-    try {
-      mechanics = JSON.parse(match[1]);
-    } catch (e) {
-      console.warn("Failed to parse DM JSON block:", e, match[1]);
-      mechanics = null;
-    }
+  if (!raw) return { narration: "", mechanics: null };
+  const text = String(raw);
+
+  // 1. Fenced JSON block (with or without "json" tag).
+  const fenceRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/i;
+  const fence = text.match(fenceRegex);
+  if (fence) {
+    let narration = text.slice(0, fence.index).trim();
+    let mechanics = null;
+    try { mechanics = JSON.parse(fence[1]); }
+    catch (e) { console.warn("DM fence JSON parse failed:", e.message); }
+    return { narration, mechanics };
   }
-  return { narration: narration.trim(), mechanics };
+
+  // 2. Bare trailing JSON object — find the LAST top-level {...} that parses.
+  // Walk backward through the string, and for each '{', try parsing from there.
+  for (let i = text.lastIndexOf("{"); i !== -1; i = text.lastIndexOf("{", i - 1)) {
+    // Find the matching closing brace by counting depth from i
+    let depth = 0, end = -1;
+    for (let j = i; j < text.length; j++) {
+      const ch = text[j];
+      if (ch === "{") depth++;
+      else if (ch === "}") {
+        depth--;
+        if (depth === 0) { end = j; break; }
+      }
+    }
+    if (end < 0) continue;
+    const candidate = text.slice(i, end + 1);
+    try {
+      const mechanics = JSON.parse(candidate);
+      // Heuristic: only accept it if it looks like our DM schema.
+      if (mechanics && (mechanics.nextTurn !== undefined
+          || mechanics.stateChanges !== undefined
+          || mechanics.options !== undefined
+          || mechanics.map !== undefined
+          || mechanics.objective !== undefined)) {
+        const narration = text.slice(0, i).trim();
+        return { narration, mechanics };
+      }
+    } catch {}
+  }
+
+  // No JSON found — return everything as narration so the players still see
+  // what the DM said. Mechanics will be null; the chain just doesn't advance.
+  return { narration: text.trim(), mechanics: null };
 }

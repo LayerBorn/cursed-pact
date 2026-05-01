@@ -9,6 +9,7 @@ import {
   setMap,
   setActionPrompt,
   clearVotes,
+  castVote,
 } from "../firebase.js";
 import { applyMechanicsToCharacter, summarizeChange, rollWithStat, formatRoll } from "./combat.js";
 import {
@@ -57,24 +58,36 @@ export async function submitPlayerAction({ roomCode, uid, name, content, rolls =
     rolls,
     submittedAt: Date.now(),
   });
-  // Submitting an action consumes the current options menu for this player.
-  await setActionPrompt(roomCode, null);
-  await clearVotes(roomCode);
+  // Don't clear votes here — that would let any joiner wipe other players' votes
+  // mid-tally. The host's runDmTurn handles prompt+vote teardown at the end of
+  // the chain.
+  // We also leave actionPrompt alone; the host clears it after the next DM call.
 }
 
-// Tally a group-vote and decide the winner once all online players have voted.
+// Returns the canonical eligible-voters list. Both tallyVotes and the UI
+// tally must use this so they never disagree.
+export function eligibleVoterUids(room) {
+  return Object.values(room?.players || {})
+    .filter((p) => p && p.uid && p.character)
+    .map((p) => p.uid);
+}
+
+// Tally a group-vote and decide the winner once all eligible players have voted.
 // Returns the winning option text + count, or null if voting still open.
 export function tallyVotes(room) {
   const prompt = room?.actionPrompt;
   if (!prompt || prompt.optionMode !== "group" || !Array.isArray(prompt.options)) return null;
-  const onlineUids = Object.values(room.players || {})
-    .filter((p) => p && p.character)
-    .map((p) => p.uid);
+  // If a previous tally already resolved this prompt, don't double-fire.
+  if (room?.votes && room.votes.__resolved) return null;
+
+  const eligible = eligibleVoterUids(room);
+  if (eligible.length < 1) return null;
+
   const votes = room.votes || {};
-  const eligible = onlineUids;
-  const cast = eligible.filter((u) => votes[u]);
-  if (!eligible.length) return null;
-  if (cast.length < eligible.length) return null; // still waiting
+  // Only count votes from currently-eligible players (kicked uids are dropped).
+  const validOptionIds = new Set(prompt.options.map((o) => o.id));
+  const cast = eligible.filter((u) => votes[u] && validOptionIds.has(votes[u]));
+  if (cast.length < eligible.length) return null;
 
   const counts = {};
   for (const u of cast) {
@@ -159,6 +172,9 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
 
   let room = initialRoom;
   let lastMechanics = null;
+  let chainOptionsStaged = [];
+  let chainOptionMode = "individual";
+  let chainNextUidHint = null;
 
   for (let i = 0; i < MAX_CHAIN; i++) {
     let result;
@@ -171,6 +187,8 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
         type: "system",
         content: `DM error: ${err.message}`,
       });
+      // Drop any stale prompt/votes so players aren't stuck on an old menu.
+      try { await setActionPrompt(roomCode, null); await clearVotes(roomCode); } catch {}
       await clearPendingActions(roomCode);
       return;
     }
@@ -219,38 +237,60 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
       try { await setObjective(roomCode, mechanics.objective.trim()); } catch {}
     }
 
-    // Update the scene map if the DM provided one.
+    // Update the scene map if the DM provided one. Merge with the previous
+    // map so dropped player tokens don't disappear when the DM forgets them.
     if (mechanics?.map && typeof mechanics.map === "object") {
       const m = mechanics.map;
+      const cleanedTokens = (Array.isArray(m.tokens) ? m.tokens : [])
+        .slice(0, 30)
+        .filter((t) => t && Array.isArray(t.pos) && t.pos.length === 2)
+        .map((t) => {
+          const tok = {
+            id: String(t.id || "").slice(0, 64),
+            label: String(t.label || "?").slice(0, 24),
+            kind: ["player", "ally", "enemy", "boss", "feature"].includes(t.kind) ? t.kind : "feature",
+            pos: [Math.max(0, Math.min(15, Number(t.pos[0]) || 0)), Math.max(0, Math.min(11, Number(t.pos[1]) || 0))],
+          };
+          const hp = Number(t.hp);
+          const maxHp = Number(t.maxHp);
+          if (Number.isFinite(hp) && Number.isFinite(maxHp) && maxHp > 0) {
+            tok.hp = Math.max(0, Math.min(9999, Math.round(hp)));
+            tok.maxHp = Math.max(1, Math.min(9999, Math.round(maxHp)));
+          }
+          return tok;
+        });
+
+      // Auto-inject a player token for anyone the DM forgot, reusing the prior
+      // map's position if known, otherwise placing them in the bottom-left.
+      const prevTokens = Array.isArray(room.map?.tokens) ? room.map.tokens : [];
+      const presentIds = new Set(cleanedTokens.map((t) => t.id));
+      for (const p of Object.values(room.players || {})) {
+        if (!p.uid || !p.character) continue;
+        if (presentIds.has(p.uid)) continue;
+        const prev = prevTokens.find((t) => t.id === p.uid);
+        cleanedTokens.push({
+          id: p.uid,
+          label: (p.character.name || "?").slice(0, 12),
+          kind: "player",
+          pos: prev?.pos ? prev.pos : [0, Math.max(0, (Array.isArray(m.size) ? Number(m.size[1]) : 5) - 1)],
+        });
+      }
+
       const cleaned = {
         scene: typeof m.scene === "string" ? m.scene.slice(0, 200) : "",
         size: Array.isArray(m.size) && m.size.length === 2
           ? [Math.max(2, Math.min(16, Number(m.size[0]) || 8)), Math.max(2, Math.min(12, Number(m.size[1]) || 5))]
           : [8, 5],
-        tokens: Array.isArray(m.tokens)
-          ? m.tokens.slice(0, 30).filter((t) => t && Array.isArray(t.pos) && t.pos.length === 2).map((t) => {
-              const tok = {
-                id: String(t.id || "").slice(0, 64),
-                label: String(t.label || "?").slice(0, 24),
-                kind: ["player", "ally", "enemy", "boss", "feature"].includes(t.kind) ? t.kind : "feature",
-                pos: [Math.max(0, Math.min(15, Number(t.pos[0]) || 0)), Math.max(0, Math.min(11, Number(t.pos[1]) || 0))],
-              };
-              const hp = Number(t.hp);
-              const maxHp = Number(t.maxHp);
-              if (Number.isFinite(hp) && Number.isFinite(maxHp) && maxHp > 0) {
-                tok.hp = Math.max(0, Math.min(9999, Math.round(hp)));
-                tok.maxHp = Math.max(1, Math.min(9999, Math.round(maxHp)));
-              }
-              return tok;
-            })
-          : [],
+        tokens: cleanedTokens,
       };
       try { await setMap(roomCode, cleaned); } catch {}
     }
 
-    // Action prompt + options. Cleared on next DM turn so we don't carry stale buttons.
+    // Stage options for THIS chain step. We commit at the end of the chain so
+    // a mid-chain auto-roll continuation doesn't wipe the player's existing
+    // vote / option panel.
     const optionsArr = Array.isArray(mechanics?.options) ? mechanics.options : [];
-    const cleanedOptions = optionsArr
+    chainOptionsStaged = optionsArr
       .map((o, idx) => {
         const text = typeof o === "string" ? o : (o && typeof o.text === "string" ? o.text : null);
         if (!text) return null;
@@ -258,25 +298,8 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
       })
       .filter(Boolean)
       .slice(0, 5);
-    if (cleanedOptions.length) {
-      const optionMode = mechanics?.optionMode === "group" ? "group" : "individual";
-      const forUid = optionMode === "individual" ? (mechanics?.nextTurn || room.currentTurn) : null;
-      try {
-        await setActionPrompt(roomCode, {
-          options: cleanedOptions,
-          optionMode,
-          forUid,
-          openedAt: Date.now(),
-        });
-        await clearVotes(roomCode);
-      } catch {}
-    } else {
-      // No options on this turn — clear any stale prompt.
-      try {
-        await setActionPrompt(roomCode, null);
-        await clearVotes(roomCode);
-      } catch {}
-    }
+    chainOptionMode = mechanics?.optionMode === "group" ? "group" : "individual";
+    chainNextUidHint = mechanics?.nextTurn || null;
 
     // If a roll is needed, auto-roll and chain the next call.
     if (mechanics?.needsRoll?.playerId && room.players?.[mechanics.needsRoll.playerId]) {
@@ -293,9 +316,30 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
     break; // no more rolls — done
   }
 
+  // Commit the staged action prompt at the END of the chain. If the DM never
+  // emitted options on any step, clear any prior stale prompt + votes.
+  try {
+    if (chainOptionsStaged.length) {
+      const nextUid = chainNextUidHint || lastMechanics?.nextTurn || nextTurnUid(room.turnOrder, room.currentTurn);
+      const forUid = chainOptionMode === "individual"
+        ? (nextUid && room.players?.[nextUid] && nextUid !== "__party__" ? nextUid : null)
+        : null;
+      await setActionPrompt(roomCode, {
+        options: chainOptionsStaged,
+        optionMode: chainOptionMode,
+        forUid,
+        openedAt: Date.now(),
+      });
+      await clearVotes(roomCode);
+    } else {
+      await setActionPrompt(roomCode, null);
+      await clearVotes(roomCode);
+    }
+  } catch {}
+
   // Advance the turn at the end of the chain.
   const nextUid = lastMechanics?.nextTurn || nextTurnUid(room.turnOrder, room.currentTurn);
-  if (nextUid && room.players?.[nextUid]) {
+  if (nextUid && room.players?.[nextUid] && room.turnOrder?.includes(nextUid)) {
     await setCurrentTurn(roomCode, nextUid);
   }
 
@@ -320,7 +364,14 @@ export function shouldRunDmTurn(room) {
 }
 
 // Submit the resolved group-vote as a party action so the DM picks it up.
-export async function submitPartyAction({ roomCode, content, count, total }) {
+// Idempotent against double-fire: stamps `votes.__resolved` first; subsequent
+// calls of tallyVotes will short-circuit on that flag.
+export async function submitPartyAction({ roomCode, content, count, total, optionId }) {
+  // Stamp the resolution before doing the rest so a fast next snapshot can't
+  // re-tally the same vote and submit a duplicate party action.
+  if (optionId) {
+    try { await castVote(roomCode, "__resolved", optionId); } catch {}
+  }
   const tag = count != null ? ` (${count}/${total})` : "";
   await postMessage(roomCode, {
     author: "__party__",
@@ -334,7 +385,7 @@ export async function submitPartyAction({ roomCode, content, count, total }) {
     submittedAt: Date.now(),
   });
   await setActionPrompt(roomCode, null);
-  await clearVotes(roomCode);
+  // Don't clear here — the host will run runDmTurn which clears at chain start.
 }
 
 // Host-only: scan the party for any player whose character has a technique

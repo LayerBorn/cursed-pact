@@ -6,6 +6,28 @@ import { findProfanity } from "../util/profanity.js";
 
 let unsubscribeLockedGradeWatch = null;
 
+const DRAFT_STORAGE_KEY = "jjk_char_draft_v1";
+function saveDraft() {
+  try {
+    const draft = {
+      name: $("#char-name")?.value || "",
+      grade: $("#char-grade")?.value || "",
+      technique: $("#char-technique")?.value || "",
+      domain: $("#char-domain")?.value || "",
+    };
+    localStorage.setItem(DRAFT_STORAGE_KEY, JSON.stringify(draft));
+  } catch {}
+}
+function loadDraft() {
+  try {
+    const raw = localStorage.getItem(DRAFT_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch { return null; }
+}
+function clearDraft() {
+  try { localStorage.removeItem(DRAFT_STORAGE_KEY); } catch {}
+}
+
 export function initCharacter({ onJoined }) {
   const picker = $("#technique-picker");
   picker.innerHTML = "";
@@ -35,6 +57,29 @@ export function initCharacter({ onJoined }) {
   // Live char counters
   bindCounter("char-technique", "char-technique-counter", 400);
   bindCounter("char-domain", "char-domain-counter", 300);
+
+  // Hydrate draft if the user accidentally refreshed the page mid-build.
+  const draft = loadDraft();
+  if (draft) {
+    if (draft.name) $("#char-name").value = draft.name;
+    if (draft.grade) $("#char-grade").value = draft.grade;
+    if (draft.technique) {
+      $("#char-technique").value = draft.technique;
+      const ev = new Event("input");
+      $("#char-technique").dispatchEvent(ev);
+    }
+    if (draft.domain) {
+      $("#char-domain").value = draft.domain;
+      const ev = new Event("input");
+      $("#char-domain").dispatchEvent(ev);
+    }
+  }
+  // Save on every keystroke / change.
+  for (const id of ["char-name", "char-grade", "char-technique", "char-domain"]) {
+    const node = document.getElementById(id);
+    if (node) node.addEventListener("input", saveDraft);
+    if (node) node.addEventListener("change", saveDraft);
+  }
 
   const submitBtn = $("#char-submit");
 
@@ -106,6 +151,7 @@ export function initCharacter({ onJoined }) {
       } else if (!isHost) {
         toast("Joined. The host will generate your abilities + stats.", "ok");
       }
+      clearDraft();
       onJoined(roomCode);
     } catch (err) {
       console.error(err);

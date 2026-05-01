@@ -9,18 +9,46 @@ export function show(viewId) {
   if (target) target.classList.add("active");
 }
 
+const MAX_TOASTS = 4;
 export function toast(message, kind = "") {
   const root = document.getElementById("toasts");
   if (!root) return;
-  const el = document.createElement("div");
-  el.className = `toast ${kind}`;
-  el.textContent = message;
-  root.appendChild(el);
+  // Cap concurrent toasts so spamming kicks/regens doesn't fill the screen.
+  while (root.children.length >= MAX_TOASTS) {
+    const oldest = root.firstElementChild;
+    if (!oldest) break;
+    oldest.remove();
+  }
+  const node = document.createElement("div");
+  node.className = `toast ${kind}`;
+  node.textContent = message;
+  root.appendChild(node);
   setTimeout(() => {
-    el.style.transition = "opacity 0.3s";
-    el.style.opacity = "0";
-    setTimeout(() => el.remove(), 300);
+    node.style.transition = "opacity 0.3s";
+    node.style.opacity = "0";
+    setTimeout(() => node.remove(), 300);
   }, 3500);
+}
+
+// Convenience: copy text to clipboard, with a fallback for older / blocked
+// clipboard contexts. Returns true on success.
+export async function copyToClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch (_) {
+    try {
+      const ta = document.createElement("textarea");
+      ta.value = text;
+      ta.style.position = "fixed";
+      ta.style.opacity = "0";
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand("copy");
+      ta.remove();
+      return true;
+    } catch { return false; }
+  }
 }
 
 export function el(tag, attrs = {}, children = []) {

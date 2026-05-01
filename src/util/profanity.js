@@ -45,23 +45,49 @@ function normalizeWords(text) {
     .filter(Boolean);
 }
 
-// Returns the matched profane word, or null. Uses two checks:
-// 1. Exact word match (less false positives)
-// 2. Concatenated substring match (catches "fuckyou", "shitbag", etc.)
+// Allow-list of common false positives — words that contain a profane
+// substring but should not trigger. Keep narrow.
+const SAFE_SUBSTRINGS = [
+  "grape", "drape", "rapeseed", "scrape", "trapeze",
+  "shitake", "shiitake",
+  "peacock", "shuttlecock", "stopcock",
+  "dickinson", "moby", // "dick" in proper nouns
+  "assassin", "class", "classic", "compass", "embarrass", "harass", "passport",
+  "hellfire", "shellfish",
+  "analyst", "analytic", "analog", "anaconda",
+  "ferret", "scunthorpe",
+];
+
+function tokenIsSafe(token) {
+  // token is already lowercased + leet-normalized.
+  for (const safe of SAFE_SUBSTRINGS) {
+    if (token === safe || token.startsWith(safe) || token.endsWith(safe)) return true;
+  }
+  return false;
+}
+
+// Returns the matched profane word, or null. Per-token check so a safe word
+// in the same sentence doesn't bypass profanity elsewhere ("asshat embarrass"
+// still flags asshat).
+//
+// For each token:
+//   - exact match → flag
+//   - if the token is in the SAFE list, allow it (no compound check)
+//   - otherwise, allow compound match only if profane word is a clean start
+//     or end with ≥2 extra letters on the other side.
 export function findProfanity(text) {
   if (!text) return null;
   const words = normalizeWords(text);
   for (const w of words) {
     for (const p of PROFANE_WORDS) {
       if (w === p) return p;
-      if (w.length >= p.length + 2 && w.includes(p)) return p;
     }
-  }
-  // Fallback: single-token substring check (catches "f-u-c-k" → "fuck" after
-  // stripping non-letters).
-  const collapsed = normalize(text);
-  for (const p of PROFANE_WORDS) {
-    if (collapsed.length >= p.length && collapsed.includes(p)) return p;
+    if (tokenIsSafe(w)) continue;
+    for (const p of PROFANE_WORDS) {
+      if (w.length < p.length + 2) continue;
+      if (w.startsWith(p) && /[a-z]{2,}$/.test(w.slice(p.length))) return p;
+      if (w.endsWith(p) && /^[a-z]{2,}/.test(w.slice(0, w.length - p.length))) return p;
+    }
   }
   return null;
 }

@@ -167,6 +167,7 @@
           <h1 class="title small">Cursed Pact</h1>
           <p class="muted small">
             Room <code id="game-room-code">—</code>
+            <button id="btn-copy-game-code" class="btn-copy" title="Copy room code">📋</button>
             <span id="game-host-badge" class="badge hidden">HOST</span>
             <span id="game-turn-badge" class="badge accent hidden">YOUR TURN</span>
           </p>
@@ -188,8 +189,9 @@
           <div id="waiting-room" class="waiting-room hidden">
             <h2 class="title">Waiting room</h2>
             <p class="muted">
-              Share room code <code id="waiting-room-code">—</code> with friends.
-              Once everyone has built their sorcerer, the host clicks <strong>Start campaign</strong> to begin.
+              Share room code <code id="waiting-room-code">—</code>
+              <button id="btn-copy-waiting-code" class="btn-copy" title="Copy room code">📋</button>
+              with friends. Once everyone has built their sorcerer, the host clicks <strong>Start campaign</strong> to begin.
             </p>
             <div id="waiting-status" class="waiting-status muted small"></div>
             <button id="btn-start-campaign" class="primary hidden">Start campaign</button>
@@ -202,6 +204,7 @@
               <span class="turn-label" id="turn-label">YOUR TURN</span>
               <span class="turn-name" id="turn-name"></span>
             </div>
+            <div class="turn-banner-next" id="turn-banner-next"></div>
           </div>
 
           <div id="chat-log" class="chat-log"></div>

@@ -635,10 +635,36 @@ button.link {
   border-color: var(--warn);
 }
 .turn-banner.group .turn-label { color: var(--warn); }
+.turn-banner-next {
+  text-align: center;
+  font-size: 0.72rem;
+  color: var(--muted);
+  letter-spacing: 0.06em;
+  padding: 4px 16px 6px;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+}
+.turn-banner-next.hidden { display: none; }
 @keyframes turn-pulse {
   0%, 100% { box-shadow: 0 0 16px var(--accent-glow); }
   50%      { box-shadow: 0 0 32px var(--accent-glow-strong); }
 }
+
+.btn-copy {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 24px;
+  height: 22px;
+  padding: 0;
+  margin: 0 4px;
+  border-radius: 4px;
+  font-size: 0.78rem;
+  cursor: pointer;
+  vertical-align: middle;
+  line-height: 1;
+}
+.btn-copy:hover { color: var(--accent2); border-color: var(--accent); }
 
 /* ──────────────────────────────────────────────────────────────────
    Action prompt: option buttons + voting

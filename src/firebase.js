@@ -140,6 +140,12 @@ export async function setPlayerOnline(roomCode, uid, online) {
 
 // Host action: remove a player from the room and from the turn order.
 export async function kickPlayer(roomCode, uid) {
+  // Refuse to kick the host — bricks the room.
+  const hostSnap = await get(roomRef(roomCode, "host"));
+  if (hostSnap.exists() && hostSnap.val() === uid) {
+    throw new Error("Cannot kick the host.");
+  }
+
   await set(roomRef(roomCode, `players/${uid}`), null);
   await runTransaction(roomRef(roomCode, "turnOrder"), (order) => {
     if (!Array.isArray(order)) return order;
@@ -153,8 +159,10 @@ export async function kickPlayer(roomCode, uid) {
     const order = orderSnap.val() || [];
     await set(curRef, order[0] || null);
   }
-  // Clear any pending action they had.
+  // Clear any pending action and any in-flight vote they cast — otherwise the
+  // tally counts kicked-uid votes and never reaches the threshold.
   await set(roomRef(roomCode, `pendingActions/${uid}`), null);
+  await set(roomRef(roomCode, `votes/${uid}`), null);
 }
 
 export function listenRoom(roomCode, callback) {
@@ -212,6 +220,21 @@ export async function setActionPrompt(roomCode, prompt) {
 }
 
 export async function castVote(roomCode, uid, optionId) {
+  // Tolerate the special "__resolved" sentinel used by the host to mark a
+  // group vote as already settled; otherwise validate against the current
+  // actionPrompt to reject stale or made-up option ids.
+  if (optionId && uid !== "__resolved") {
+    try {
+      const promptSnap = await get(roomRef(roomCode, "actionPrompt"));
+      const prompt = promptSnap.val();
+      const valid = prompt && Array.isArray(prompt.options)
+        && prompt.options.some((o) => o && o.id === optionId);
+      if (!valid) throw new Error("Vote ignored: option not in current prompt.");
+    } catch (e) {
+      if (e?.message?.startsWith?.("Vote ignored")) throw e;
+      // network error reading prompt → fall through, allow the write
+    }
+  }
   await set(roomRef(roomCode, `votes/${uid}`), optionId || null);
 }
 
