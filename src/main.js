@@ -192,25 +192,46 @@ function bootAccount() {
   window.__app.openAccount = () => showAccountView();
 }
 
+// Surface any uncaught runtime error visibly so a blank-page bug is
+// debuggable from the console (and we can show a one-liner banner).
+window.addEventListener("error", (e) => {
+  console.error("[boot uncaught]", e.error || e.message);
+});
+window.addEventListener("unhandledrejection", (e) => {
+  console.error("[boot unhandled rejection]", e.reason);
+});
+
+function safeBoot(label, fn) {
+  try { fn(); }
+  catch (err) { console.error(`[boot] ${label} failed:`, err); }
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
-  bootKeyGate();
-  bootAuth();
-  bootBuilds();
-  bootAccount();
-  bootLobby();
-  bootCharacter();
-  bootGame();
+  // Each boot is wrapped so a single broken view doesn't kill the page.
+  safeBoot("keyGate",   bootKeyGate);
+  safeBoot("auth",      bootAuth);
+  safeBoot("builds",    bootBuilds);
+  safeBoot("account",   bootAccount);
+  safeBoot("lobby",     bootLobby);
+  safeBoot("character", bootCharacter);
+  safeBoot("game",      bootGame);
 
   // Handle ?verify= and ?reset= query params from email links BEFORE routing,
   // so the user lands in the right view with feedback.
   await handleVerifyParam();
 
+  // If Firebase init throws (placeholder config, network), don't leave the
+  // page blank — fall back to the auth view at least.
   try { initFirebase(); }
   catch (err) {
     console.error(err);
     toast(`Firebase init failed: ${err.message}`, "error");
+    show("view-auth");
     return;
   }
+
+  // Last-resort: ensure SOME view is active before async work resolves.
+  if (!document.querySelector(".view.active")) show("view-auth");
 
   // If a stored CP token is present from a prior visit, validate it before
   // routing to the lobby. Failure clears the token and falls through.
