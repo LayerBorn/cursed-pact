@@ -54,7 +54,24 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 #app { min-height: 100vh; display: flex; flex-direction: column; }
 .view { display: none; flex: 1; padding: 24px; align-items: center; justify-content: center; }
 .view.active { display: flex; }
-#view-game.active { display: flex; flex-direction: column; padding: 16px; align-items: stretch; justify-content: stretch; }
+
+/* When the game view is active, lock the page height to viewport so the
+   chat-log scrolls internally instead of taking the body with it. The party
+   panel, turn banner, action prompt, and action form stay pinned. */
+body:has(#view-game.active) {
+  overflow: hidden;
+  height: 100vh;
+}
+#view-game.active {
+  display: flex;
+  flex-direction: column;
+  padding: 12px;
+  align-items: stretch;
+  justify-content: stretch;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
 
 .card {
   background: var(--surface);
@@ -187,6 +204,7 @@ button.link {
   border: 1px solid var(--border);
   border-radius: 10px;
   margin-bottom: 12px;
+  flex-shrink: 0;
 }
 .game-header-actions { display: flex; gap: 8px; }
 
@@ -196,6 +214,8 @@ button.link {
   grid-template-columns: 280px 1fr;
   gap: 12px;
   min-height: 0;
+  /* Each column manages its own scroll */
+  overflow: hidden;
 }
 
 .party-panel {
@@ -204,6 +224,7 @@ button.link {
   border-radius: 10px;
   padding: 14px;
   overflow-y: auto;
+  min-height: 0;
 }
 .party-panel h2 { margin-bottom: 10px; }
 
@@ -477,14 +498,23 @@ button.link {
   border: 1px solid var(--border);
   border-radius: 10px;
   min-height: 0;
+  /* The chat-area participates in the grid; chat-log inside scrolls. */
+  overflow: hidden;
 }
 
 .chat-log {
   flex: 1;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   display: flex; flex-direction: column; gap: 12px;
+  min-height: 0;
 }
+
+/* Pin the turn banner to the top of chat-area, action UI to the bottom.
+   Chat-log between them takes the remaining space and scrolls. */
+#turn-banner, #objective-bar { flex-shrink: 0; }
+#dm-thinking, #dice-tray, #action-prompt, #action-form { flex-shrink: 0; }
 
 .msg {
   border-radius: 8px;
@@ -543,8 +573,13 @@ button.link {
 .badge.accent { background: var(--accent); color: white; box-shadow: 0 0 12px var(--accent-glow); }
 
 @media (max-width: 800px) {
-  .game-layout { grid-template-columns: 1fr; }
-  .party-panel { max-height: 200px; }
+  /* Stack party panel above chat. Party gets a fixed slice; chat takes the
+     rest. Both scroll internally so the action prompt + form stay pinned. */
+  .game-layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: minmax(140px, 28%) 1fr;
+  }
+  .party-panel { max-height: none; }
 }
 
 /* ─────────────── Dice animation ─────────────── */
