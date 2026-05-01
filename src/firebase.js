@@ -87,6 +87,7 @@ export async function createRoom(roomCode, hostUid, options = {}) {
     createdAt: serverTimestamp(),
     status: "lobby",
     lockedGrade: options.lockedGrade || null,
+    dmTone: options.dmTone || "balanced",
     players: {},
     turnOrder: [],
     currentTurn: null,
@@ -212,6 +213,43 @@ export async function setObjective(roomCode, objective) {
 
 export async function setMap(roomCode, map) {
   await set(roomRef(roomCode, "map"), map || null);
+}
+
+// Save a snapshot of the room's mutable state so the host can revert the last
+// DM run if the response was bad. Stored at /rooms/$id/_lastSnapshot.
+export async function setLastSnapshot(roomCode, snapshot) {
+  await set(roomRef(roomCode, "_lastSnapshot"), snapshot || null);
+}
+
+// Restore players, objective, map, actionPrompt, votes from a saved snapshot,
+// and delete any messages added after the snapshot was taken.
+export async function restoreFromSnapshot(roomCode, snapshot) {
+  if (!snapshot) return;
+  const updates = {};
+  if (snapshot.players) {
+    // Rewrite each player's full record so we don't merge with stale changes.
+    for (const [uid, playerRecord] of Object.entries(snapshot.players)) {
+      updates[`players/${uid}`] = playerRecord;
+    }
+  }
+  updates.objective    = snapshot.objective ?? null;
+  updates.map          = snapshot.map ?? null;
+  updates.actionPrompt = snapshot.actionPrompt ?? null;
+  updates.votes        = snapshot.votes ?? null;
+  updates.currentTurn  = snapshot.currentTurn ?? null;
+  await update(roomRef(roomCode), updates);
+
+  // Delete any messages added after the snapshot was captured.
+  const before = new Set(snapshot.messageIdsBefore || []);
+  const allSnap = await get(roomRef(roomCode, "messages"));
+  const all = allSnap.val() || {};
+  const toDelete = {};
+  for (const id of Object.keys(all)) {
+    if (!before.has(id)) toDelete[`messages/${id}`] = null;
+  }
+  if (Object.keys(toDelete).length) {
+    await update(roomRef(roomCode), toDelete);
+  }
 }
 
 export async function setActionPrompt(roomCode, prompt) {

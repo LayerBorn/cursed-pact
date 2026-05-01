@@ -248,6 +248,8 @@ button.link {
 .party-bar-fill { height: 100%; transition: width 0.3s; }
 .party-bar-fill.hp { background: linear-gradient(90deg, var(--danger), #ff7b8a); }
 .party-bar-fill.ce { background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+.party-bar-fill.xp { background: linear-gradient(90deg, var(--good), #b8ffd0); }
+.party-name-main { font-weight: 600; }
 .party-meta { display: flex; justify-content: space-between; font-size: 0.74rem; color: var(--muted); }
 .party-abilities {
   margin-top: 8px;
@@ -700,6 +702,34 @@ button.link {
   line-height: 1;
 }
 .btn-copy:hover { color: var(--accent2); border-color: var(--accent); }
+
+/* DM rerun button overlay on the latest DM message */
+.dm-rerun-btn {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-family: inherit;
+  cursor: pointer;
+  letter-spacing: 0.05em;
+  transition: all var(--transition);
+  z-index: 1;
+}
+.dm-rerun-btn:hover {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+  box-shadow: 0 0 8px var(--accent-glow);
+}
+.msg.dm { position: relative; }
+
+/* Level-up message flair */
+.msg.system { transition: color 200ms; }
 
 /* ──────────────────────────────────────────────────────────────────
    Action prompt: option buttons + voting

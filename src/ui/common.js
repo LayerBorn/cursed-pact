@@ -30,6 +30,27 @@ export function toast(message, kind = "") {
   }, 3500);
 }
 
+// Deterministic player color palette. Each uid maps to one color so chat
+// messages from the same player are easy to spot at a glance.
+const PLAYER_COLORS = [
+  "#5ee0a6", // mint
+  "#6fb5ff", // sky
+  "#ffb84d", // amber
+  "#ff7b8a", // rose
+  "#b89aff", // violet (default accent)
+  "#7adfd1", // teal
+  "#ffaa7a", // peach
+  "#a7e85b", // lime
+];
+export function colorForUid(uid) {
+  if (!uid) return "#b89aff";
+  let hash = 0;
+  for (let i = 0; i < uid.length; i++) {
+    hash = (hash * 31 + uid.charCodeAt(i)) | 0;
+  }
+  return PLAYER_COLORS[Math.abs(hash) % PLAYER_COLORS.length];
+}
+
 // Convenience: copy text to clipboard, with a fallback for older / blocked
 // clipboard contexts. Returns true on success.
 export async function copyToClipboard(text) {
@@ -71,6 +92,63 @@ export function escapeHtml(s) {
   return String(s ?? "").replace(/[&<>"']/g, (c) =>
     ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
   );
+}
+
+// Build a Markdown transcript from a room's message log. Used by the
+// "Export log" button to download a campaign log file.
+export function buildTranscript(room, roomCode) {
+  const lines = [];
+  lines.push(`# Cursed Pact — campaign transcript`);
+  lines.push("");
+  lines.push(`**Room:** \`${roomCode || "?"}\``);
+  if (room?.dmTone) lines.push(`**DM tone:** ${room.dmTone}`);
+  if (room?.objective) lines.push(`**Objective:** ${room.objective}`);
+  lines.push(`**Exported:** ${new Date().toISOString()}`);
+  lines.push("");
+  if (room?.players) {
+    lines.push("## Party");
+    for (const p of Object.values(room.players)) {
+      const c = p.character || {};
+      lines.push(`- **${c.name || p.name || "?"}** (${c.grade || "?"}, ${c.xp || 0} XP) — ${c.technique || "(no technique)"}`);
+    }
+    lines.push("");
+  }
+  lines.push("## Log");
+  lines.push("");
+  const msgs = Object.entries(room?.messages || {})
+    .map(([id, m]) => ({ id, ...m }))
+    .sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+  for (const m of msgs) {
+    const ts = m.timestamp ? new Date(m.timestamp).toISOString().slice(11, 19) : "";
+    if (m.type === "dm") {
+      lines.push(`### DM ${ts ? `(${ts})` : ""}`);
+      lines.push("");
+      lines.push(m.content || "");
+      lines.push("");
+    } else if (m.type === "system") {
+      lines.push(`> _${m.content || ""}_`);
+      lines.push("");
+    } else if (m.type === "roll") {
+      lines.push(`**${m.authorName || "?"} ${ts ? `(${ts})` : ""}** rolled: ${m.content || ""}`);
+      lines.push("");
+    } else {
+      lines.push(`**${m.authorName || "?"} ${ts ? `(${ts})` : ""}:** ${m.content || ""}`);
+      lines.push("");
+    }
+  }
+  return lines.join("\n");
+}
+
+export function downloadAsFile(filename, content) {
+  const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 5000);
 }
 
 // marked is loaded as a global script tag.

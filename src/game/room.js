@@ -10,12 +10,14 @@ import {
   setActionPrompt,
   clearVotes,
   castVote,
+  setLastSnapshot,
+  restoreFromSnapshot,
 } from "../firebase.js";
 import { applyMechanicsToCharacter, summarizeChange, rollWithStat, formatRoll } from "./combat.js";
 import {
   buildTurnUserMessage,
   callDm,
-  DM_SYSTEM_PROMPT,
+  buildSystemPrompt,
   parseDmResponse,
   hostHasDmProvider,
   generateAbilities,
@@ -115,7 +117,7 @@ async function callDmOnce({ roomCode, room, hostUid }) {
   );
 
   const raw = await callDm({
-    systemPrompt: DM_SYSTEM_PROMPT,
+    systemPrompt: buildSystemPrompt(room.dmTone),
     userMessage: userMsg,
   });
   return parseDmResponse(raw);
@@ -152,7 +154,7 @@ async function autoRollAndPost({ roomCode, room, needsRoll }) {
 // MAX_CHAIN times to resolve any auto-rolls inline, then advances the turn.
 const MAX_CHAIN = 4;
 
-export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
+export async function runDmTurn({ roomCode, room: initialRoom, hostUid, isRerun = false }) {
   if (!hostHasDmProvider()) {
     await postMessage(roomCode, {
       author: "system",
@@ -163,11 +165,31 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
     return;
   }
 
+  // Capture a snapshot of the room's mutable state BEFORE we start mutating
+  // anything. The host can use this to undo the run if the DM was bad.
+  if (!isRerun) {
+    try {
+      const snapshot = {
+        players: initialRoom.players ? JSON.parse(JSON.stringify(initialRoom.players)) : {},
+        objective: initialRoom.objective ?? null,
+        map: initialRoom.map ?? null,
+        actionPrompt: initialRoom.actionPrompt ?? null,
+        votes: initialRoom.votes ?? null,
+        currentTurn: initialRoom.currentTurn ?? null,
+        messageIdsBefore: Object.keys(initialRoom.messages || {}),
+        capturedAt: Date.now(),
+      };
+      await setLastSnapshot(roomCode, snapshot);
+    } catch (err) {
+      console.warn("Failed to capture pre-run snapshot:", err);
+    }
+  }
+
   await postMessage(roomCode, {
     author: "system",
     authorName: "system",
     type: "system",
-    content: "The DM gathers their thoughts…",
+    content: isRerun ? "The DM reconsiders…" : "The DM gathers their thoughts…",
   });
 
   let room = initialRoom;
@@ -211,8 +233,10 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
         const player = room.players?.[change.playerId];
         if (!player) continue;
         const newChar = applyMechanicsToCharacter(player.character, change);
+        // _levelUp is a transient marker — strip before persisting.
+        const promotedTo = newChar._levelUp;
+        if (promotedTo) delete newChar._levelUp;
         await updatePlayerCharacter(roomCode, change.playerId, newChar);
-        // Update our local room copy so subsequent chained DM calls see fresh stats.
         room = {
           ...room,
           players: {
@@ -228,6 +252,17 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid }) {
             type: "system",
             content: summary,
           });
+        }
+        // Post a celebratory level-up message for each grade crossed.
+        if (Array.isArray(promotedTo) && promotedTo.length) {
+          for (const grade of promotedTo) {
+            await postMessage(roomCode, {
+              author: "system",
+              authorName: "system",
+              type: "system",
+              content: `🌀 LEVEL UP — ${player.name} promoted to ${grade}.`,
+            });
+          }
         }
       }
     }
@@ -463,6 +498,60 @@ async function generateAbilitiesForPlayer({ roomCode, player, forced = false }) 
       content: `Could not generate abilities for ${c.name || "player"}: ${err.message}. Host can click ↻ on their card to retry.`,
     });
   }
+}
+
+// Host action: revert to the snapshot captured before the most recent DM run,
+// then re-call the DM with the same context. Used when the DM hallucinates
+// or breaks canon.
+export async function rerunLastDmTurn({ roomCode, room, hostUid }) {
+  if (!hostHasDmProvider()) {
+    await postMessage(roomCode, {
+      author: "system", authorName: "system", type: "system",
+      content: "Cannot rerun — host has no DM provider configured.",
+    });
+    return;
+  }
+  const snap = room?._lastSnapshot;
+  if (!snap || !snap.players) {
+    await postMessage(roomCode, {
+      author: "system", authorName: "system", type: "system",
+      content: "Nothing to rerun yet.",
+    });
+    return;
+  }
+  // Restore the snapshot's state.
+  try {
+    await restoreFromSnapshot(roomCode, snap);
+  } catch (err) {
+    console.error("Snapshot restore failed:", err);
+    await postMessage(roomCode, {
+      author: "system", authorName: "system", type: "system",
+      content: `Rerun failed: ${err.message}`,
+    });
+    return;
+  }
+  await postMessage(roomCode, {
+    author: "system", authorName: "system", type: "system",
+    content: "↻ Reverting to before the last DM turn.",
+  });
+  // Build a synthetic restored room state to pass into the DM call. The
+  // listener will catch up shortly with the real Firebase state, but we
+  // shouldn't wait for that round-trip.
+  const restoredRoom = {
+    ...room,
+    players: snap.players,
+    objective: snap.objective ?? null,
+    map: snap.map ?? null,
+    actionPrompt: snap.actionPrompt ?? null,
+    votes: snap.votes ?? null,
+    currentTurn: snap.currentTurn ?? null,
+    messages: Object.fromEntries(
+      Object.entries(room.messages || {}).filter(([id]) => (snap.messageIdsBefore || []).includes(id))
+    ),
+  };
+  // Re-run with isRerun=true so we don't capture a NEW snapshot (we want to
+  // be able to rerun-the-rerun and end up at the same place).
+  await runDmTurn({ roomCode, room: restoredRoom, hostUid, isRerun: true });
 }
 
 // Plant the "Campaign begins." marker so all clients see the opening prompt

@@ -1,4 +1,4 @@
-import { $, show, toast, el, escapeHtml, renderMarkdown, copyToClipboard } from "./common.js";
+import { $, show, toast, el, escapeHtml, renderMarkdown, copyToClipboard, colorForUid, buildTranscript, downloadAsFile } from "./common.js";
 import {
   listenRoom,
   postMessage,
@@ -13,6 +13,7 @@ import {
   submitPlayerAction,
   submitPartyAction,
   runDmTurn,
+  rerunLastDmTurn,
   shouldRunDmTurn,
   triggerCampaignStart,
   generateMissingAbilities,
@@ -21,6 +22,7 @@ import {
   eligibleVoterUids,
   nextTurnUid,
 } from "../game/room.js";
+import { XP_TO_NEXT } from "../game/character.js";
 import { findProfanity } from "../util/profanity.js";
 
 const INACTIVE_AFTER_MS = 3 * 60 * 1000; // 3 min — long enough that "thinking" doesn't trigger it
@@ -62,6 +64,15 @@ export function initGame({ onLeave }) {
     actionInput.addEventListener("input", updateAC);
     updateAC();
   }
+
+  // Export log button
+  $("#btn-export-log")?.addEventListener("click", () => {
+    if (!lastRoom) { toast("Nothing to export yet.", "warn"); return; }
+    const md = buildTranscript(lastRoom, roomCode);
+    const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    downloadAsFile(`cursed-pact-${roomCode || "room"}-${stamp}.md`, md);
+    toast("Campaign log downloaded.", "ok");
+  });
 
   // Copy room code buttons
   for (const id of ["btn-copy-game-code", "btn-copy-waiting-code"]) {
@@ -255,8 +266,37 @@ function renderRoom(room) {
   renderParty(room);
   renderMap(room);
   renderMessages(room);
+  renderRerunButton(room);
   renderActionPrompt(room);
   renderTurnState(room);
+}
+
+// Host-only ↻ button overlaid on the most recent DM message. Lets the host
+// revert and re-roll the last DM turn if it was bad.
+function renderRerunButton(room) {
+  const log = $("#chat-log");
+  // Remove any prior rerun button.
+  log.querySelectorAll(".dm-rerun-btn").forEach((b) => b.remove());
+  if (!isHost) return;
+  if (!room?._lastSnapshot) return;
+  // Find the last .msg.dm in the log.
+  const dmMsgs = log.querySelectorAll(".msg.dm");
+  if (!dmMsgs.length) return;
+  const last = dmMsgs[dmMsgs.length - 1];
+  const btn = el("button", {
+    class: "dm-rerun-btn",
+    title: "Rerun this turn (revert state, re-call DM)",
+    onclick: async () => {
+      if (!confirm("Rerun the last DM turn? This reverts HP / CE / XP / map and re-asks the DM.")) return;
+      try {
+        await rerunLastDmTurn({ roomCode, room: lastRoom, hostUid: currentUid() });
+      } catch (err) {
+        console.error(err);
+        toast(`Rerun failed: ${err.message}`, "error");
+      }
+    },
+  }, "↻ rerun");
+  last.appendChild(btn);
 }
 
 function renderWaitingRoom(room) {
@@ -556,9 +596,12 @@ function renderParty(room) {
       class: `party-card ${isYou ? "you" : ""} ${isCurrent ? "current-turn" : ""} ${inactive ? "inactive" : ""}`,
     });
 
+    const nameSpan = el("span", { class: "party-name-main" }, escapeHtml(c.name || p.name || "?"));
+    nameSpan.style.color = colorForUid(p.uid);
     const nameRow = el("div", { class: "party-name" }, [
       el("span", { class: "party-name-text" }, [
-        `${escapeHtml(c.name || p.name || "?")} `,
+        nameSpan,
+        " ",
         el("span", { class: "party-grade" }, escapeHtml(c.grade || "")),
       ]),
     ]);
@@ -611,6 +654,19 @@ function renderParty(room) {
     card.appendChild(hpBar);
     card.appendChild(el("div", { class: "party-meta" }, [`CE ${c.cursedEnergy ?? 0}/${c.maxCursedEnergy ?? 0}`, ""]));
     card.appendChild(ceBar);
+
+    // XP bar + label
+    const xp = Number(c.xp) || 0;
+    const xpNeeded = XP_TO_NEXT[c.grade] ?? Infinity;
+    const xpPct = Number.isFinite(xpNeeded)
+      ? Math.max(0, Math.min(100, Math.round((xp / xpNeeded) * 100)))
+      : 100;
+    const xpLabel = Number.isFinite(xpNeeded) ? `XP ${xp}/${xpNeeded}` : `XP ${xp} (max grade)`;
+    card.appendChild(el("div", { class: "party-meta" }, [xpLabel, ""]));
+    card.appendChild(el("div", { class: "party-bar" }, el("div", {
+      class: "party-bar-fill xp",
+      style: `width:${xpPct}%`,
+    })));
 
     if (Array.isArray(c.abilities) && c.abilities.length) {
       const abList = el("div", { class: "party-abilities" });
@@ -685,6 +741,12 @@ function renderMessageNode(m, me) {
   const author = document.createElement("div");
   author.className = "msg-author";
   author.textContent = m.type === "dm" ? "DM" : (m.authorName || (m.author === me ? "You" : "?"));
+  // Apply a deterministic per-player color for player and roll messages.
+  if ((m.type === "player" || m.type === "roll") && m.author && m.author !== "__party__") {
+    const c = colorForUid(m.author);
+    author.style.color = c;
+    wrap.style.borderLeftColor = c;
+  }
   wrap.appendChild(author);
 
   const body = document.createElement("div");

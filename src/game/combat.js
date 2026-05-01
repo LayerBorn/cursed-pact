@@ -1,5 +1,5 @@
 // Dice + applying state changes from the DM JSON block.
-import { statModifier } from "./character.js";
+import { statModifier, XP_TO_NEXT, nextGrade, promoteCharacter } from "./character.js";
 
 export function rollD20() {
   return 1 + Math.floor(Math.random() * 20);
@@ -56,11 +56,28 @@ export function applyMechanicsToCharacter(character, change) {
       }
     }
     if (Array.isArray(change.items.remove)) {
-      // Remove first matching occurrence per entry.
       for (const r of change.items.remove) {
         const idx = c.items.indexOf(r);
         if (idx >= 0) c.items.splice(idx, 1);
       }
+    }
+  }
+  // XP delta + auto-promote on threshold.
+  if (typeof change.xp === "number" && Number.isFinite(change.xp)) {
+    c.xp = Math.max(0, Math.round((c.xp || 0) + change.xp));
+    // Cascade promote in case the player crossed multiple thresholds at once.
+    while (true) {
+      const need = XP_TO_NEXT[c.grade];
+      if (!Number.isFinite(need)) break;
+      if (c.xp < need) break;
+      const promoted = promoteCharacter(c);
+      if (promoted.grade === c.grade) break; // already maxed
+      // Carry remainder XP into the new grade level.
+      const remainder = c.xp - need;
+      Object.assign(c, promoted);
+      c.xp = remainder;
+      c._levelUp = (c._levelUp || []);
+      c._levelUp.push(c.grade);
     }
   }
   return c;
@@ -74,6 +91,9 @@ export function summarizeChange(change, characterName) {
   }
   if (typeof change.cursedEnergy === "number" && change.cursedEnergy !== 0) {
     bits.push(`${change.cursedEnergy > 0 ? "+" : ""}${change.cursedEnergy} CE`);
+  }
+  if (typeof change.xp === "number" && change.xp !== 0) {
+    bits.push(`${change.xp > 0 ? "+" : ""}${change.xp} XP`);
   }
   if (change.statusEffects?.add?.length) bits.push(`+status: ${change.statusEffects.add.join(", ")}`);
   if (change.statusEffects?.remove?.length) bits.push(`-status: ${change.statusEffects.remove.join(", ")}`);

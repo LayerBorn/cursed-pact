@@ -87,7 +87,7 @@
         <div class="lobby-grid">
           <div class="lobby-half">
             <h2>Create a room</h2>
-            <p class="muted small">You'll be the host. Only the host's browser calls Gemini.</p>
+            <p class="muted small">You'll be the host. Only the host's browser calls the DM.</p>
             <label class="small">Lock everyone to a grade (optional)
               <select id="lock-grade">
                 <option value="">Free choice</option>
@@ -97,6 +97,13 @@
                 <option value="Grade 1">Grade 1</option>
                 <option value="Semi-Grade 1">Semi-Grade 1</option>
                 <option value="Special Grade">Special Grade</option>
+              </select>
+            </label>
+            <label class="small">DM tone
+              <select id="dm-tone">
+                <option value="balanced" selected>Balanced — fair but unforgiving when it matters</option>
+                <option value="forgiving">Forgiving — softer, more leniency on rolls</option>
+                <option value="brutal">Brutal — death is real, NPCs lie, loot is rare</option>
               </select>
             </label>
             <button id="btn-create" class="primary">Create room</button>
@@ -173,6 +180,7 @@
           </p>
         </div>
         <div class="game-header-actions">
+          <button id="btn-export-log" class="ghost small" title="Download campaign log as Markdown">⬇ Log</button>
           <button id="btn-leave" class="ghost small">Leave</button>
         </div>
       </header>

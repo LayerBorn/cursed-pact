@@ -28,6 +28,58 @@ const STARTER_GRADE_HP = {
   "Special Grade": { hp: 180, ce: 220 },
 };
 
+// Order of grades from weakest to strongest. Used for leveling.
+export const GRADE_ORDER = [
+  "Grade 4",
+  "Grade 3",
+  "Grade 2",
+  "Semi-Grade 1",
+  "Grade 1",
+  "Special Grade",
+];
+
+// XP required to advance FROM that grade to the next. The last grade caps.
+export const XP_TO_NEXT = {
+  "Grade 4":      120,
+  "Grade 3":      280,
+  "Grade 2":      520,
+  "Semi-Grade 1": 850,
+  "Grade 1":      1300,
+  "Special Grade": Infinity,
+};
+
+// Returns the grade above the current one, or null if maxed.
+export function nextGrade(currentGrade) {
+  const i = GRADE_ORDER.indexOf(currentGrade);
+  if (i < 0 || i === GRADE_ORDER.length - 1) return null;
+  return GRADE_ORDER[i + 1];
+}
+
+// Promote a character to the next grade in-place, awarding the bigger HP/CE
+// pool of the new grade. Existing HP/CE are scaled to preserve %, and the
+// player gets a small "freshly-promoted" buff to refill above 80%.
+export function promoteCharacter(character) {
+  const next = nextGrade(character.grade);
+  if (!next) return character;
+  const before = STARTER_GRADE_HP[character.grade] || STARTER_GRADE_HP["Grade 3"];
+  const after  = STARTER_GRADE_HP[next] || before;
+  const hpPct  = (character.hp ?? before.hp) / (character.maxHp ?? before.hp);
+  const cePct  = (character.cursedEnergy ?? before.ce) / (character.maxCursedEnergy ?? before.ce);
+  const newMaxHp = after.hp;
+  const newMaxCe = after.ce;
+  // Refill to at least 80% on promotion.
+  const restoredHp = Math.max(Math.round(newMaxHp * 0.8), Math.round(newMaxHp * hpPct));
+  const restoredCe = Math.max(Math.round(newMaxCe * 0.8), Math.round(newMaxCe * cePct));
+  return {
+    ...character,
+    grade: next,
+    maxHp: newMaxHp,
+    hp: Math.min(newMaxHp, restoredHp),
+    maxCursedEnergy: newMaxCe,
+    cursedEnergy: Math.min(newMaxCe, restoredCe),
+  };
+}
+
 export function defaultCharacter(name) {
   return {
     name: name || "Unnamed sorcerer",
@@ -42,6 +94,7 @@ export function defaultCharacter(name) {
     statusEffects: [],
     items: [],
     abilities: [],
+    xp: 0,
   };
 }
 
@@ -64,6 +117,7 @@ export function buildCharacter({ name, grade, technique, domain, stats, abilitie
     statusEffects: [],
     items: [],
     abilities: Array.isArray(abilities) ? abilities : [],
+    xp: 0,
   };
 }
 
