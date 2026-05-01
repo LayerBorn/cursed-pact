@@ -8,7 +8,7 @@ import {
   onCpAuthChange,
 } from "../cpApi.js";
 import { STARTER_TECHNIQUES, buildCharacter } from "../game/character.js";
-import { generateAbilities, hostHasDmProvider } from "../gemini.js";
+import { generateAbilities, rebalanceAbilities, hostHasDmProvider } from "../gemini.js";
 import { findProfanity } from "../util/profanity.js";
 
 let editingBuildId = null;
@@ -157,6 +157,44 @@ export function initBuildEditor({ onSaved, onCancel }) {
     if (!editingPreview) editingPreview = { stats: { phys: 12, tech: 12, spirit: 12 }, abilities: [] };
     renderPreview(editingPreview);
     $("#build-editor-status").textContent = "Editing manually. Add abilities, tweak stats, then Save.";
+  });
+
+  // Re-balance current (manually edited) abilities to fit the chosen grade.
+  $("#btn-build-rebalance").addEventListener("click", async () => {
+    syncManualAbilities();
+    const technique = ($("#build-technique").value || "").trim();
+    const grade = $("#build-grade").value;
+    const abilities = editingPreview?.abilities || [];
+    if (!abilities.length) {
+      toast("Add some abilities first (or hit Generate).", "warn");
+      return;
+    }
+    if (!hostHasDmProvider()) {
+      toast("Need a Gemini key or Ollama set up to rebalance.", "warn");
+      window.__app.returnViewAfterKey = "view-build-editor";
+      show("view-key");
+      return;
+    }
+    const btn = $("#btn-build-rebalance");
+    btn.disabled = true;
+    const orig = btn.textContent;
+    btn.textContent = "Auditing…";
+    try {
+      const result = await rebalanceAbilities({ technique, grade, abilities });
+      if (result.abilities && result.abilities.length) {
+        editingPreview = { ...editingPreview, abilities: result.abilities };
+        renderPreview(editingPreview);
+        $("#build-editor-status").textContent = `Rebalanced to ${grade}. Save to keep.`;
+      } else {
+        toast("Auditor returned nothing — try again.", "warn");
+      }
+    } catch (err) {
+      console.error(err);
+      $("#build-editor-status").textContent = `Rebalance failed: ${err.message}`;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = orig;
+    }
   });
 
   // Add a blank ability row to the manual editor.

@@ -367,11 +367,12 @@ function formatAbilities(abilities) {
 }
 
 // ─────────────── Ability + stat generator ───────────────
-// Called once during character creation to derive both NAMED abilities and
-// balanced stats (Phys / Tech / Spirit, each 1-20) from the player's
-// free-form technique description.
+// Called during character creation to derive 3 NAMED abilities and balanced
+// stats (Phys / Tech / Spirit, each 1-20) from the player's free-form
+// technique description. Power scales with grade so a Grade 4 rookie can't
+// accidentally end up with Special-Grade-tier abilities.
 const ABILITY_GEN_PROMPT = `You convert a Jujutsu Kaisen sorcerer's free-form cursed technique description into:
-  (a) 3 NAMED abilities the player can invoke during play, and
+  (a) 3 NAMED abilities the player can invoke during play, balanced to their grade, and
   (b) a balanced set of three stats (Physical, Technique, Spirit), each 1–20.
 
 Output EXACTLY a JSON object (no prose, no markdown fence) with this shape:
@@ -385,24 +386,107 @@ Output EXACTLY a JSON object (no prose, no markdown fence) with this shape:
   ]
 }
 
-STAT RULES
-- All three stats are 1–20. The sum should land within the budget for the grade:
-  Grade 4 → ~30 total. Grade 3 → ~36. Grade 2 → ~42. Grade 1 → ~48. Semi-Grade 1 → ~46. Special Grade → ~54.
-- Distribute the points to FIT the technique:
-  - "Physical" tracks raw striking power, durability, melee. Heavenly Restriction, brawler-types, raw cursed bodies skew high.
-  - "Technique" tracks finesse, precision, reflexes, sorcerous control of complex effects. Limitless, Ten Shadows, Cursed Speech skew high.
-  - "Spirit" tracks cursed-energy reserve, RCT aptitude, mental fortitude. Domain users, sealing types, healer types skew high.
+STAT BUDGET (sum across all three stats)
+- Grade 4 → ~30 total. Grade 3 → ~36. Grade 2 → ~42. Semi-Grade 1 → ~46. Grade 1 → ~48. Special Grade → ~54.
+- "Physical" — raw striking power, durability, melee. Heavenly Restriction / brawler-types skew high.
+- "Technique" — finesse, precision, reflexes, sorcerous control. Limitless / Ten Shadows / Cursed Speech skew high.
+- "Spirit" — CE reserve, RCT aptitude, mental fortitude. Domain users / sealing / healer types skew high.
 - No stat below 6 unless the technique explicitly demands a weakness.
 
-ABILITY RULES
-- Exactly 3 abilities, ordered cheap → expensive.
-- Costs are cursed-energy points (CE). Use 5–15 for cantrip-tier, 20–40 for combat-staple, 50–80 for signature/finisher.
-- Each ability must be ROOTED in the technique description. If the technique is "Fire Manipulation", abilities should all be flame-themed.
-- Effects must be concrete: damage, area, status, duration, conditions. Avoid "very powerful", "destroys everything".
-- Names should sound JJK-canon: short, evocative, sometimes bilingual (English ok).
-- Do NOT include domain expansion in this list — domain expansion is separate.
+ABILITY POWER TIERS BY GRADE (HARD CONSTRAINT — DO NOT EXCEED)
+The character's grade caps how lethal/area-affecting any single ability can be.
+Tiers reset for each grade — a "signature" Grade 4 ability is weaker than a
+"combat-staple" Grade 1 ability. Match the tier to the player's grade:
+
+  GRADE 4 (rookie):
+    cantrip:   bruises, light cuts, brief sparks. Single target. Range ≤10m.
+    staple:    one-target moderate damage OR a 1-turn debuff. Range ≤20m.
+    signature: hard hit on one target OR small AoE (~3m). No instant kills, no status > 2 turns.
+    Cost band: 5-10 / 15-25 / 35-50.
+
+  GRADE 3 (default):
+    cantrip:   reliable utility — small heat, tiny shadow, weak shikigami. Single target.
+    staple:    solid combat hit, can finish a wounded Grade-4 curse. Brief stun / 2-turn slow ok.
+    signature: notable strike OR small-mid AoE (~5m). Stuns / poisons up to 2 turns.
+    Cost band: 5-12 / 18-30 / 40-60.
+
+  GRADE 2:
+    cantrip:   precise utility, moderate damage on a single target.
+    staple:    finishes a Grade-3 curse. Mid-range AoE (~6m) ok. Real status effects (paralyze 1 turn, bleed).
+    signature: powerful strike, sometimes ignoring partial cover. Poison ticks, brief immobilize.
+    Cost band: 8-15 / 20-35 / 45-70.
+
+  SEMI-GRADE 1:
+    Like Grade 2 but ~10% stronger across the board. Slight signature push toward AoE.
+    Cost band: 8-15 / 20-35 / 45-70.
+
+  GRADE 1 (standout sorcerer):
+    cantrip:   real damage even at the cheap tier.
+    staple:    can carve through a Grade-2 curse. ~8m AoE, multiple-target, status effects up to 3 turns.
+    signature: devastating but localized (≤15m radius). Can disable a target outright for 1 turn.
+    Cost band: 10-20 / 25-40 / 50-75.
+
+  SPECIAL GRADE (rare, terrifying):
+    cantrip:   wipes out trash mobs.
+    staple:    mid-AoE annihilation, can disable a Grade-1 outright.
+    signature: cataclysmic but localized (~25m radius); can permanently maim or instantly kill non-bosses.
+    Cost band: 12-25 / 30-45 / 55-80.
+
+NEVER:
+- Give a Grade 4 a "instantly kill" or "city-block AoE" anything.
+- Give a Grade 3 a permanent debuff or "ignores all defenses".
+- Cap any single ability at MORE than 80 CE (frontend clamps anyway).
+- Bypass dice ("automatically hits") below Special Grade.
+
+ROOT EVERY ABILITY IN THE TECHNIQUE
+- Fire Manipulation → all 3 abilities are flame-themed.
+- Ten Shadows → all 3 are shikigami summons / shadow effects.
+- Cursed Speech → all 3 use commands and have a "throat damage" backlash hint.
+- DO NOT include domain expansion here; that's a separate field.
+
+WRITING STYLE
+- Names: 1–4 words, evocative, sometimes Japanese loan-word ok (Kuroshibari, etc.). No emoji.
+- Effects: one sentence, mechanically clear: damage tier, range/area, duration, condition. Avoid "very", "extremely", "powerful" — name a number or a clear scope instead.
 
 Output ONLY the JSON object. No markdown, no commentary.`;
+
+// Audit + rebalance an existing set of abilities to fit a target grade. Used
+// by the "Re-balance to grade" button on the manual editor. Returns the same
+// shape but with adjusted names/costs/effects scaled to the grade tier.
+const REBALANCE_PROMPT = `You are a power-budget auditor for a Jujutsu Kaisen RPG. The player has manually written abilities for a sorcerer of a given grade. You must adjust each ability so it FITS that grade's power tier per the table below. Do not invent unrelated abilities.
+
+POWER TIERS BY GRADE (cost bands — cantrip / staple / signature):
+- Grade 4:        5-10  / 15-25 / 35-50
+- Grade 3:        5-12  / 18-30 / 40-60
+- Grade 2:        8-15  / 20-35 / 45-70
+- Semi-Grade 1:   8-15  / 20-35 / 45-70
+- Grade 1:       10-20  / 25-40 / 50-75
+- Special Grade: 12-25  / 30-45 / 55-80
+
+EFFECT GUIDELINES (don't exceed for the player's grade):
+- Grade 4: damage moderate, range ≤20m, status effects ≤2 turns, no instant kills.
+- Grade 3: status effects ≤2 turns, AoE ≤5m, finisher can take a wounded Grade-4.
+- Grade 2: AoE ≤6m, status effects ≤2 turns, finisher takes a Grade-3.
+- Semi-Grade 1: like Grade 2 +~10%.
+- Grade 1: AoE ≤8m on staple, ≤15m on signature; up to 3-turn status; can disable a target 1 turn.
+- Special Grade: AoE up to ~25m; can instakill non-bosses on signature.
+
+RULES:
+1. Keep ability names unchanged unless the original name is profanity or unrelated to the technique. Light tweaks for clarity are ok.
+2. Adjust costs to fall in the grade's cost band. Order cheap → expensive.
+3. Rewrite effects to match the grade's power tier. Tone DOWN if too strong, tone UP if too weak.
+4. Each ability must remain rooted in the player's overall technique.
+5. Output the SAME number of abilities as the input (max 4).
+6. Effects are one sentence, ≤200 chars, no prose preamble.
+
+Output EXACTLY a JSON object (no markdown fence) of this shape:
+
+{
+  "abilities": [
+    { "name": "...", "cost": <number>, "effect": "..." },
+    ...
+  ]
+}`;
 
 export async function generateAbilities({ technique, grade }) {
   const userMsg = `Sorcerer grade: ${grade || "Grade 3"}\nCursed technique:\n"""\n${(technique || "").trim() || "(undeclared technique — invent something generic)"}\n"""`;
@@ -455,6 +539,59 @@ export async function generateAbilities({ technique, grade }) {
   }
 
   return { abilities: cleanedAbilities, stats };
+}
+
+// ─────────────── Re-balance existing abilities to a grade ───────────────
+// Used by the "Re-balance to grade" button on the manual ability editor.
+// Takes the user's hand-edited abilities and asks the AI to rescale them
+// to fit the target grade's power band.
+export async function rebalanceAbilities({ technique, grade, abilities }) {
+  if (!Array.isArray(abilities) || !abilities.length) {
+    return { abilities: [] };
+  }
+  const userMsg = [
+    `Sorcerer grade: ${grade || "Grade 3"}`,
+    `Cursed technique:`,
+    `"""`,
+    (technique || "").trim() || "(generic)",
+    `"""`,
+    ``,
+    `Current abilities (re-balance these to the grade above):`,
+    JSON.stringify({ abilities: abilities.map((a) => ({
+      name: String(a.name || "").slice(0, 40),
+      cost: Number.isFinite(Number(a.cost)) ? Math.round(Number(a.cost)) : 10,
+      effect: String(a.effect || "").slice(0, 200),
+    })) }, null, 2),
+  ].join("\n");
+
+  const raw = await callDm({
+    systemPrompt: REBALANCE_PROMPT,
+    userMessage: userMsg,
+    jsonMode: true,
+  });
+
+  let text = raw.trim();
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+  if (fence) text = fence[1];
+  let parsed;
+  try { parsed = JSON.parse(text); }
+  catch {
+    const m = text.match(/\{[\s\S]*\}/);
+    if (m) {
+      try { parsed = JSON.parse(m[0]); } catch {}
+    }
+    if (!parsed) throw new Error("Could not parse rebalance JSON.");
+  }
+
+  const out = (Array.isArray(parsed.abilities) ? parsed.abilities : [])
+    .filter((a) => a && typeof a.name === "string" && typeof a.effect === "string")
+    .slice(0, 4)
+    .map((a) => ({
+      name: String(a.name).slice(0, 40),
+      cost: Number.isFinite(Number(a.cost)) ? Math.max(0, Math.min(80, Math.round(Number(a.cost)))) : 10,
+      effect: String(a.effect).slice(0, 200),
+    }));
+  return { abilities: out };
 }
 
 // ─────────────── Parsing the DM response ───────────────
