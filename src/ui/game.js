@@ -109,46 +109,98 @@ export function initGame({ onLeave }) {
   if (quickRoll) quickRoll.style.display = "none";
 }
 
+// Track in-flight submissions so a fast double-tap can't fire the same
+// action twice. (Greed sent "Move stealthily" twice in 1.2s in a recent
+// session, costing CE + XP twice and burning a DM turn.)
+let lastSubmittedContent = null;
+let lastSubmittedAt = 0;
+let actionInFlight = false;
+
 async function sendAction() {
+  if (actionInFlight) return;
   const text = $("#action-input").value.trim();
-  if (!text) {
-    toast("Type something to do.", "warn");
-    return;
-  }
+  if (!text) { toast("Type something to do.", "warn"); return; }
   if (text.length > 500) { toast("Action too long (max 500 chars).", "warn"); return; }
   if (findProfanity(text)) { toast(`Profanity detected — please rephrase.`, "error"); return; }
+  if (isDuplicateSubmission(text)) { toast("Already sent that.", "warn"); return; }
 
   const my = lastRoom?.players?.[currentUid()];
   if (!my) { toast("Not in this room.", "error"); return; }
 
-  // If a group prompt is open, freeform isn't appropriate — they should vote.
-  // We still allow it so the host can override, but warn.
   if (lastRoom?.actionPrompt?.optionMode === "group") {
     toast("Group vote in progress — submitting freeform overrides the vote.", "warn");
   }
 
-  await submitPlayerAction({
-    roomCode,
-    uid: currentUid(),
-    name: my.name,
-    content: text,
-    rolls: [],
+  await runWithLock(async () => {
+    await submitPlayerAction({
+      roomCode,
+      uid: currentUid(),
+      name: my.name,
+      content: text,
+      rolls: [],
+    });
+    rememberSubmission(text);
+    $("#action-input").value = "";
+    const counter = $("#action-counter");
+    if (counter) { counter.textContent = "0 / 500"; counter.classList.remove("near-limit"); }
   });
-  $("#action-input").value = "";
-  const counter = $("#action-counter");
-  if (counter) { counter.textContent = "0 / 500"; counter.classList.remove("near-limit"); }
 }
 
 async function submitOption(optionText) {
+  if (actionInFlight) return;
+  if (isDuplicateSubmission(optionText)) { toast("Already sent that.", "warn"); return; }
   const my = lastRoom?.players?.[currentUid()];
   if (!my) return;
-  await submitPlayerAction({
-    roomCode,
-    uid: currentUid(),
-    name: my.name,
-    content: optionText,
-    rolls: [],
+  await runWithLock(async () => {
+    await submitPlayerAction({
+      roomCode,
+      uid: currentUid(),
+      name: my.name,
+      content: optionText,
+      rolls: [],
+    });
+    rememberSubmission(optionText);
   });
+}
+
+// Lock the action UI for the duration of `fn` so the user can't double-tap
+// while the network call is round-tripping. Buttons go disabled, the panel
+// fades, the textarea + send button are blocked. Released after a small
+// grace period so the listener has a chance to clear the prompt server-side
+// before the user could re-tap.
+async function runWithLock(fn) {
+  actionInFlight = true;
+  setActionUiLocked(true);
+  try { await fn(); }
+  finally {
+    setTimeout(() => {
+      actionInFlight = false;
+      setActionUiLocked(false);
+    }, 400);
+  }
+}
+
+function setActionUiLocked(locked) {
+  const panel = $("#action-prompt");
+  if (panel) panel.classList.toggle("locked", locked);
+  for (const btn of document.querySelectorAll(".option-btn")) {
+    if (locked) btn.disabled = true;
+    // Don't auto-re-enable here — renderActionPrompt will redraw the buttons
+    // with their proper disabled state on the next listener fire.
+  }
+  const sendBtn = $("#btn-send");
+  if (sendBtn) sendBtn.disabled = locked;
+  const ti = $("#action-input");
+  if (ti) ti.disabled = locked;
+}
+
+function isDuplicateSubmission(content) {
+  if (!content) return false;
+  return content === lastSubmittedContent && (Date.now() - lastSubmittedAt) < 3000;
+}
+function rememberSubmission(content) {
+  lastSubmittedContent = content;
+  lastSubmittedAt = Date.now();
 }
 
 async function castVoteFor(optionId) {

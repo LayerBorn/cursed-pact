@@ -769,6 +769,7 @@ button.link {
   animation: prompt-in 220ms ease-out;
 }
 .action-prompt.hidden { display: none; }
+.action-prompt.locked { opacity: 0.5; pointer-events: none; }
 .action-prompt-header {
   display: flex;
   justify-content: space-between;

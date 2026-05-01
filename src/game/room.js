@@ -1,6 +1,7 @@
 // Room state helpers + DM-turn orchestration. Only the host calls Gemini.
 import {
   postMessage,
+  deleteMessage,
   setCurrentTurn,
   updatePlayerCharacter,
   setPendingAction,
@@ -185,7 +186,10 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid, isRerun 
     }
   }
 
-  await postMessage(roomCode, {
+  // Post the "thinking" indicator and remember its id so we can DELETE it
+  // when the DM actually responds. Otherwise the chat log fills up with stale
+  // "thinking" entries from queued actions.
+  const thinkingMsgId = await postMessage(roomCode, {
     author: "system",
     authorName: "system",
     type: "system",
@@ -225,6 +229,12 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid, isRerun 
         type: "dm",
         content: narration,
       });
+      // Delete the "thinking" placeholder now that the real DM message is up.
+      // Only the first chain step's placeholder gets cleaned this way; later
+      // chain steps don't add their own (they re-use this one).
+      if (thinkingMsgId && i === 0) {
+        try { await deleteMessage(roomCode, thinkingMsgId); } catch {}
+      }
     }
 
     // Apply mechanical state changes per player.

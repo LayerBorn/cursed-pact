@@ -242,6 +242,11 @@ export async function postMessage(roomCode, message) {
   return newRef.key;
 }
 
+export async function deleteMessage(roomCode, messageId) {
+  if (!messageId) return;
+  await set(roomRef(roomCode, `messages/${messageId}`), null);
+}
+
 export async function setCurrentTurn(roomCode, uid) {
   // Debug log so turn transitions are inspectable in the console. The caller
   // should pass a string-ish uid (or null between scenes).
