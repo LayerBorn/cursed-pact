@@ -91,6 +91,7 @@ XP & LEVELING (award generously but earned)
 
 YOUR RESPONSIBILITIES
 - Run scenes vividly but tightly. 2–6 short paragraphs per turn is ideal. Use markdown.
+- ADDRESS THE CURRENT-TURN PLAYER BY NAME. Open each non-opening turn with a direct line to that player ("Yuji, the curse lurches at you—" or "Megumi—you feel the pressure shift behind you."). Speak to them in second person ("you"), not third. The other players are observers in this beat, but reference them by name when their position or state matters ("Nobara is still bleeding from her arm to your left"). The CURRENT TURN uid is provided in the per-turn input.
 - Voice NPCs in their distinct voices. Make Gojo annoying, Nanami exhausted, Sukuna disdainful.
 - Adjudicate dice. If a player attempts something with meaningful uncertainty (combat, perception, persuasion, CE control under stress), set "needsRoll" in the JSON. The system will auto-roll for them and re-call you with the result. Don't ask them to roll in narration; just stop the narration at the moment the roll is needed and set "needsRoll".
 - Track HP, cursed energy, status effects, items. When state changes, declare it in the JSON block.
@@ -247,17 +248,26 @@ export function buildTurnUserMessage(party, turnOrder, currentTurnUid, recentMes
     return `${author}: ${m.content}`;
   }).join("\n");
 
+  // Resolve the current-turn player's name so we can spotlight it for the
+  // model. Empty string when nobody is on the clock (opening turn / between
+  // scenes); the model will then narrate without addressing anyone.
+  const currentPlayer = currentTurnUid ? party?.[currentTurnUid] : null;
+  const currentName = currentPlayer?.character?.name || currentPlayer?.name || null;
+  const currentLine = currentName
+    ? `CURRENT TURN: ${currentName} (uid ${currentTurnUid}) ← address THIS player by name in second person`
+    : `CURRENT TURN: (none — narrate without addressing anyone)`;
+
   return [
     `PARTY STATE:`,
     partyLines || "(no players)",
     ``,
     `TURN ORDER (uids in order): ${(turnOrder || []).join(", ") || "(empty)"}`,
-    `CURRENT TURN: ${currentTurnUid || "(none)"}`,
+    currentLine,
     ``,
     `RECENT LOG (oldest → newest):`,
     logLines || "(empty — this is the start of the campaign)",
     ``,
-    `Now, as the DM, respond. Narration first (markdown), then a single \`\`\`json fenced block per the system instructions.`,
+    `Now, as the DM, respond. ${currentName ? `Open the narration by addressing ${currentName} directly.` : ``} Narration first (markdown), then a single \`\`\`json fenced block per the system instructions.`,
   ].join("\n");
 }
 

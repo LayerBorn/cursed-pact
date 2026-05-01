@@ -7,6 +7,8 @@ export function show(viewId) {
   document.querySelectorAll(".view").forEach((v) => v.classList.remove("active"));
   const target = document.getElementById(viewId);
   if (target) target.classList.add("active");
+  // Toggle body.in-game so the layout-lock CSS works in browsers without :has().
+  document.body.classList.toggle("in-game", viewId === "view-game");
 }
 
 const MAX_TOASTS = 4;

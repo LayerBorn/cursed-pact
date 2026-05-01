@@ -57,8 +57,10 @@ code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; background: 
 
 /* When the game view is active, lock the page height to viewport so the
    chat-log scrolls internally instead of taking the body with it. The party
-   panel, turn banner, action prompt, and action form stay pinned. */
-body:has(#view-game.active) {
+   panel, turn banner, action prompt, and action form stay pinned. We toggle
+   `body.in-game` from main.js whenever view-game becomes active so this
+   works in every browser (don't rely on :has()). */
+body.in-game {
   overflow: hidden;
   height: 100vh;
 }
@@ -71,6 +73,7 @@ body:has(#view-game.active) {
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  min-height: 0;
 }
 
 .card {
@@ -209,13 +212,15 @@ button.link {
 .game-header-actions { display: flex; gap: 8px; }
 
 .game-layout {
-  flex: 1;
+  flex: 1 1 0;
   display: grid;
   grid-template-columns: 280px 1fr;
   gap: 12px;
   min-height: 0;
   /* Each column manages its own scroll */
   overflow: hidden;
+  /* Explicit bound so children with overflow:auto actually scroll */
+  height: 100%;
 }
 
 .party-panel {
@@ -224,7 +229,11 @@ button.link {
   border-radius: 10px;
   padding: 14px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   min-height: 0;
+  /* Explicit max-height so the panel doesn't try to grow with its content */
+  max-height: 100%;
+  height: 100%;
 }
 .party-panel h2 { margin-bottom: 10px; }
 
@@ -500,23 +509,27 @@ button.link {
   border: 1px solid var(--border);
   border-radius: 10px;
   min-height: 0;
+  height: 100%;
   /* The chat-area participates in the grid; chat-log inside scrolls. */
   overflow: hidden;
 }
 
 .chat-log {
-  flex: 1;
+  flex: 1 1 0;
   overflow-y: auto;
   overscroll-behavior: contain;
   padding: 16px;
   display: flex; flex-direction: column; gap: 12px;
-  min-height: 0;
+  min-height: 80px;
 }
 
-/* Pin the turn banner to the top of chat-area, action UI to the bottom.
+/* Pin the turn banner / objective at the top, action UI at the bottom.
    Chat-log between them takes the remaining space and scrolls. */
-#turn-banner, #objective-bar { flex-shrink: 0; }
-#dm-thinking, #dice-tray, #action-prompt, #action-form { flex-shrink: 0; }
+#turn-banner, #objective-bar, #waiting-room { flex-shrink: 0; flex-grow: 0; }
+#dm-thinking, #dice-tray, #action-prompt, #action-form { flex-shrink: 0; flex-grow: 0; }
+/* Cap the action prompt's max height so 4 long option buttons don't squish
+   the chat-log down to 0px on a small viewport. */
+#action-prompt { max-height: 40%; overflow-y: auto; overscroll-behavior: contain; }
 
 .msg {
   border-radius: 8px;
@@ -575,13 +588,16 @@ button.link {
 .badge.accent { background: var(--accent); color: white; box-shadow: 0 0 12px var(--accent-glow); }
 
 @media (max-width: 800px) {
-  /* Stack party panel above chat. Party gets a fixed slice; chat takes the
-     rest. Both scroll internally so the action prompt + form stay pinned. */
+  /* Stack party panel above chat. Party slice is small but expandable on
+     a click; chat gets all the remaining space. Both scroll internally so
+     the action prompt + form stay pinned. */
   .game-layout {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(140px, 28%) 1fr;
+    grid-template-rows: minmax(120px, 25%) 1fr;
   }
-  .party-panel { max-height: none; }
+  .party-panel { max-height: 100%; }
+  /* Action prompt cap relaxed on mobile since the chat is shorter anyway */
+  #action-prompt { max-height: 50%; }
 }
 
 /* ─────────────── Dice animation ─────────────── */
