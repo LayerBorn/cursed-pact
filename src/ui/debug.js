@@ -219,8 +219,8 @@ export function verifyRoomInvariants(room) {
     });
   }
 
-  // 6. pendingActions keys should be uids that exist (or "__party__"/"__opening__").
-  const allowedPendingKeys = new Set([...playerIds, "__party__", "__opening__"]);
+  // 6. pendingActions keys should be uids that exist (or "__party__" sentinel).
+  const allowedPendingKeys = new Set([...playerIds, "__party__"]);
   for (const k of Object.keys(room.pendingActions || {})) {
     if (!allowedPendingKeys.has(k)) {
       issues.push({ severity: "err", text: `pendingActions has stale key "${k}" (player removed?).` });

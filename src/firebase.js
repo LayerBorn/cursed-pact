@@ -202,9 +202,10 @@ export async function setPlayerOnline(roomCode, uid, online) {
   });
 }
 
-// Host action: remove a player from the room and from the turn order.
+// Host action: remove a player from the room and from every place their uid
+// might still be referenced (turnOrder, currentTurn, pendingActions, votes,
+// the rerun snapshot's player list, and map tokens).
 export async function kickPlayer(roomCode, uid) {
-  // Refuse to kick the host — bricks the room.
   const hostSnap = await get(roomRef(roomCode, "host"));
   if (hostSnap.exists() && hostSnap.val() === uid) {
     throw new Error("Cannot kick the host.");
@@ -215,7 +216,7 @@ export async function kickPlayer(roomCode, uid) {
     if (!Array.isArray(order)) return order;
     return order.filter((u) => u !== uid);
   });
-  // If they were the current turn, advance.
+  // Advance currentTurn if the kicked player was on the clock.
   const curRef = roomRef(roomCode, "currentTurn");
   const snap = await get(curRef);
   if (snap.exists() && snap.val() === uid) {
@@ -223,10 +224,41 @@ export async function kickPlayer(roomCode, uid) {
     const order = orderSnap.val() || [];
     await set(curRef, order[0] || null);
   }
-  // Clear any pending action and any in-flight vote they cast — otherwise the
-  // tally counts kicked-uid votes and never reaches the threshold.
+  // Clear pending action + in-flight vote — otherwise the vote tally counts
+  // kicked-uid votes and never reaches the threshold.
   await set(roomRef(roomCode, `pendingActions/${uid}`), null);
   await set(roomRef(roomCode, `votes/${uid}`), null);
+
+  // Scrub the rerun snapshot so a host re-run doesn't bring the kicked
+  // player back from the dead with their old state.
+  try {
+    const snapRef = roomRef(roomCode, "_lastSnapshot");
+    const lastSnap = await get(snapRef);
+    if (lastSnap.exists()) {
+      const data = lastSnap.val();
+      if (data?.players?.[uid]) delete data.players[uid];
+      if (Array.isArray(data?.turnOrder)) data.turnOrder = data.turnOrder.filter((u) => u !== uid);
+      if (data?.pendingActions?.[uid]) delete data.pendingActions[uid];
+      if (data?.votes?.[uid]) delete data.votes[uid];
+      if (data?.currentTurn === uid) data.currentTurn = data.turnOrder?.[0] ?? null;
+      await set(snapRef, data);
+    }
+  } catch (e) { console.warn("kickPlayer snapshot scrub failed:", e); }
+
+  // Drop any map tokens that referenced this player.
+  try {
+    const mapRef = roomRef(roomCode, "map");
+    const mapSnap = await get(mapRef);
+    if (mapSnap.exists()) {
+      const m = mapSnap.val();
+      if (Array.isArray(m?.tokens)) {
+        const filtered = m.tokens.filter((t) => t.id !== uid);
+        if (filtered.length !== m.tokens.length) {
+          await set(mapRef, { ...m, tokens: filtered });
+        }
+      }
+    }
+  } catch (e) { console.warn("kickPlayer map scrub failed:", e); }
 }
 
 export function listenRoom(roomCode, callback) {
@@ -294,22 +326,24 @@ export async function setLastSnapshot(roomCode, snapshot) {
   await set(roomRef(roomCode, "_lastSnapshot"), snapshot || null);
 }
 
-// Restore players, objective, map, actionPrompt, votes from a saved snapshot,
-// and delete any messages added after the snapshot was taken.
+// Restore players, objective, map, actionPrompt, votes, turnOrder, and
+// pendingActions from a saved snapshot, and delete any messages added after
+// the snapshot was taken.
 export async function restoreFromSnapshot(roomCode, snapshot) {
   if (!snapshot) return;
   const updates = {};
   if (snapshot.players) {
-    // Rewrite each player's full record so we don't merge with stale changes.
-    for (const [uid, playerRecord] of Object.entries(snapshot.players)) {
-      updates[`players/${uid}`] = playerRecord;
-    }
+    // Wipe all current players first by writing the full set as a unit, so a
+    // player who was added between snapshot and rerun gets removed cleanly.
+    updates.players = snapshot.players;
   }
-  updates.objective    = snapshot.objective ?? null;
-  updates.map          = snapshot.map ?? null;
-  updates.actionPrompt = snapshot.actionPrompt ?? null;
-  updates.votes        = snapshot.votes ?? null;
-  updates.currentTurn  = snapshot.currentTurn ?? null;
+  updates.objective      = snapshot.objective ?? null;
+  updates.map            = snapshot.map ?? null;
+  updates.actionPrompt   = snapshot.actionPrompt ?? null;
+  updates.votes          = snapshot.votes ?? null;
+  updates.currentTurn    = snapshot.currentTurn ?? null;
+  updates.turnOrder      = Array.isArray(snapshot.turnOrder) ? snapshot.turnOrder : [];
+  updates.pendingActions = snapshot.pendingActions ?? null;
   await update(roomRef(roomCode), updates);
 
   // Delete any messages added after the snapshot was captured.

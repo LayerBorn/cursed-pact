@@ -23,61 +23,88 @@ export function formatRoll(roll) {
   return `d20: **${roll.die}** ${sign} ${roll.statName} = **${roll.total}**${suffix}`;
 }
 
+// Per-turn caps on state-change deltas. These prevent a hallucinating DM
+// (or compromised JSON) from one-shotting players or cascade-promoting them
+// from Grade 4 to Special Grade in one turn. Tuned to allow normal play —
+// a brutal hit can wipe a character but not exceed their max pool.
+const MAX_XP_PER_TURN = 250;        // covers "complete a Special Grade encounter"
+const MAX_STATUS_TAGS_ADDED = 3;
+const MAX_STATUS_TAGS_REMOVED = 5;
+const MAX_ITEMS_ADDED = 5;
+
 // Apply DM-issued mechanics to a player's character. Returns the new character.
 // Mechanics shape comes from gemini.js parseDmResponse:
-//   { hp: -10, cursedEnergy: -20, statusEffects: { add: [...], remove: [...] }, items: { add, remove }, note }
+//   { hp: -10, cursedEnergy: -20, xp: 25, statusEffects: { add, remove }, items: { add, remove } }
+// Every numeric delta is bounded so a misbehaving DM can't corrupt state.
 export function applyMechanicsToCharacter(character, change) {
   const c = { ...(character || {}) };
   c.statusEffects = Array.isArray(c.statusEffects) ? [...c.statusEffects] : [];
   c.items = Array.isArray(c.items) ? [...c.items] : [];
 
-  if (typeof change.hp === "number") {
-    const next = (c.hp ?? c.maxHp ?? 0) + change.hp;
-    c.hp = Math.max(0, Math.min(c.maxHp ?? next, next));
+  if (typeof change.hp === "number" && Number.isFinite(change.hp)) {
+    // Cap |hp delta| at the character's maxHp so a single turn can't deal
+    // more damage than the player's full pool (no "you take 99999 damage").
+    const maxHp = c.maxHp || 100;
+    const dh = Math.max(-maxHp, Math.min(maxHp, change.hp));
+    const next = (c.hp ?? maxHp) + dh;
+    c.hp = Math.max(0, Math.min(maxHp, next));
   }
-  if (typeof change.cursedEnergy === "number") {
-    const next = (c.cursedEnergy ?? c.maxCursedEnergy ?? 0) + change.cursedEnergy;
-    c.cursedEnergy = Math.max(0, Math.min(c.maxCursedEnergy ?? next, next));
+  if (typeof change.cursedEnergy === "number" && Number.isFinite(change.cursedEnergy)) {
+    const maxCe = c.maxCursedEnergy || 80;
+    const dce = Math.max(-maxCe, Math.min(maxCe, change.cursedEnergy));
+    const next = (c.cursedEnergy ?? maxCe) + dce;
+    c.cursedEnergy = Math.max(0, Math.min(maxCe, next));
   }
   if (change.statusEffects) {
     if (Array.isArray(change.statusEffects.add)) {
-      for (const s of change.statusEffects.add) {
-        if (s && !c.statusEffects.includes(s)) c.statusEffects.push(s);
+      const adds = change.statusEffects.add.slice(0, MAX_STATUS_TAGS_ADDED);
+      for (const s of adds) {
+        if (typeof s === "string" && s.length <= 40 && !c.statusEffects.includes(s)) {
+          c.statusEffects.push(s);
+        }
       }
+      // Cap total status effects per character — a 50-tag list is absurd.
+      if (c.statusEffects.length > 12) c.statusEffects = c.statusEffects.slice(-12);
     }
     if (Array.isArray(change.statusEffects.remove)) {
-      c.statusEffects = c.statusEffects.filter((s) => !change.statusEffects.remove.includes(s));
+      const removes = change.statusEffects.remove.slice(0, MAX_STATUS_TAGS_REMOVED);
+      c.statusEffects = c.statusEffects.filter((s) => !removes.includes(s));
     }
   }
   if (change.items) {
     if (Array.isArray(change.items.add)) {
-      for (const it of change.items.add) {
-        if (it) c.items.push(it);
+      const adds = change.items.add.slice(0, MAX_ITEMS_ADDED);
+      for (const it of adds) {
+        if (typeof it === "string" && it.length <= 80) c.items.push(it);
       }
+      if (c.items.length > 30) c.items = c.items.slice(-30);
     }
     if (Array.isArray(change.items.remove)) {
-      for (const r of change.items.remove) {
+      for (const r of change.items.remove.slice(0, 10)) {
         const idx = c.items.indexOf(r);
         if (idx >= 0) c.items.splice(idx, 1);
       }
     }
   }
-  // XP delta + auto-promote on threshold.
+  // XP delta + auto-promote on threshold. Cap |delta| at MAX_XP_PER_TURN
+  // so the DM can't cascade-promote Grade 4 → Special Grade in one call.
   if (typeof change.xp === "number" && Number.isFinite(change.xp)) {
-    c.xp = Math.max(0, Math.round((c.xp || 0) + change.xp));
-    // Cascade promote in case the player crossed multiple thresholds at once.
-    while (true) {
+    const dxp = Math.max(-MAX_XP_PER_TURN, Math.min(MAX_XP_PER_TURN, change.xp));
+    c.xp = Math.max(0, Math.round((c.xp || 0) + dxp));
+    // Limit cascade depth so even runaway XP can't promote multiple grades.
+    let promotions = 0;
+    while (promotions < 1) {
       const need = XP_TO_NEXT[c.grade];
       if (!Number.isFinite(need)) break;
       if (c.xp < need) break;
       const promoted = promoteCharacter(c);
-      if (promoted.grade === c.grade) break; // already maxed
-      // Carry remainder XP into the new grade level.
+      if (promoted.grade === c.grade) break;
       const remainder = c.xp - need;
       Object.assign(c, promoted);
       c.xp = remainder;
       c._levelUp = (c._levelUp || []);
       c._levelUp.push(c.grade);
+      promotions++;
     }
   }
   return c;

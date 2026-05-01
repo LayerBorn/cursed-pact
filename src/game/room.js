@@ -77,6 +77,8 @@ export function eligibleVoterUids(room) {
 
 // Tally a group-vote and decide the winner once all eligible players have voted.
 // Returns the winning option text + count, or null if voting still open.
+// Deterministic tie-break: when two options tie, the one that appears EARLIER
+// in prompt.options wins (so the order is stable across browsers).
 export function tallyVotes(room) {
   const prompt = room?.actionPrompt;
   if (!prompt || prompt.optionMode !== "group" || !Array.isArray(prompt.options)) return null;
@@ -87,19 +89,18 @@ export function tallyVotes(room) {
   if (eligible.length < 1) return null;
 
   const votes = room.votes || {};
-  // Only count votes from currently-eligible players (kicked uids are dropped).
   const validOptionIds = new Set(prompt.options.map((o) => o.id));
   const cast = eligible.filter((u) => votes[u] && validOptionIds.has(votes[u]));
   if (cast.length < eligible.length) return null;
 
   const counts = {};
-  for (const u of cast) {
-    const v = votes[u];
-    counts[v] = (counts[v] || 0) + 1;
-  }
+  for (const u of cast) counts[votes[u]] = (counts[votes[u]] || 0) + 1;
+
+  // Iterate prompt.options in order so ties resolve to the first-listed.
   let bestId = null, bestCount = 0;
-  for (const [id, c] of Object.entries(counts)) {
-    if (c > bestCount) { bestId = id; bestCount = c; }
+  for (const opt of prompt.options) {
+    const c = counts[opt.id] || 0;
+    if (c > bestCount) { bestId = opt.id; bestCount = c; }
   }
   const opt = prompt.options.find((o) => o.id === bestId);
   return opt ? { option: opt, count: bestCount, total: cast.length } : null;
@@ -168,6 +169,8 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid, isRerun 
 
   // Capture a snapshot of the room's mutable state BEFORE we start mutating
   // anything. The host can use this to undo the run if the DM was bad.
+  // Includes turnOrder + pendingActions so a rerun after a kick or a
+  // resolved vote restores the full game state, not just the slice.
   if (!isRerun) {
     try {
       const snapshot = {
@@ -177,6 +180,8 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid, isRerun 
         actionPrompt: initialRoom.actionPrompt ?? null,
         votes: initialRoom.votes ?? null,
         currentTurn: initialRoom.currentTurn ?? null,
+        turnOrder: Array.isArray(initialRoom.turnOrder) ? [...initialRoom.turnOrder] : [],
+        pendingActions: initialRoom.pendingActions ? JSON.parse(JSON.stringify(initialRoom.pendingActions)) : {},
         messageIdsBefore: Object.keys(initialRoom.messages || {}),
         capturedAt: Date.now(),
       };
@@ -230,9 +235,21 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid, isRerun 
         content: narration,
       });
       // Delete the "thinking" placeholder now that the real DM message is up.
-      // Only the first chain step's placeholder gets cleaned this way; later
-      // chain steps don't add their own (they re-use this one).
       if (thinkingMsgId && i === 0) {
+        try { await deleteMessage(roomCode, thinkingMsgId); } catch {}
+      }
+    } else if (i === 0) {
+      // The DM returned an empty narration on the FIRST chain step. If we
+      // don't post anything, shouldRunDmTurn's opening trigger will re-fire
+      // forever because hasAnyDmMsg stays false. Post a placeholder so the
+      // loop breaks; the host can hit ↻ rerun if the DM keeps doing this.
+      await postMessage(roomCode, {
+        author: "dm",
+        authorName: "DM",
+        type: "dm",
+        content: "_(The DM returned no narration. Use the ↻ rerun button to retry.)_",
+      });
+      if (thinkingMsgId) {
         try { await deleteMessage(roomCode, thinkingMsgId); } catch {}
       }
     }
@@ -346,15 +363,23 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid, isRerun 
     chainOptionMode = mechanics?.optionMode === "group" ? "group" : "individual";
     chainNextUidHint = mechanics?.nextTurn || null;
 
-    // If a roll is needed, auto-roll and chain the next call.
-    if (mechanics?.needsRoll?.playerId && room.players?.[mechanics.needsRoll.playerId]) {
-      room = await autoRollAndPost({ roomCode, room, needsRoll: mechanics.needsRoll });
-      // Keep currentTurn as the rolling player so the next prompt frames it correctly.
-      const stayUid = mechanics.needsRoll.playerId;
-      if (room.currentTurn !== stayUid) {
-        await setCurrentTurn(roomCode, stayUid);
-        room = { ...room, currentTurn: stayUid };
+    // If a roll is needed, auto-roll and chain the next call. The DM's
+    // suggested playerId must match the current turn — otherwise a
+    // hallucinated needsRoll could steal someone else's turn.
+    const needsRoll = mechanics?.needsRoll;
+    const validRollPlayer = needsRoll?.playerId
+      && room.players?.[needsRoll.playerId]
+      && (needsRoll.playerId === room.currentTurn || needsRoll.playerId === "__party__" === false);
+    if (needsRoll?.playerId && room.players?.[needsRoll.playerId]) {
+      // Hard guard: only auto-roll for the actual current-turn player.
+      if (needsRoll.playerId !== room.currentTurn) {
+        await postMessage(roomCode, {
+          author: "system", authorName: "system", type: "system",
+          content: `DM tried to auto-roll for ${room.players[needsRoll.playerId]?.name || needsRoll.playerId} but it's not their turn — skipping.`,
+        });
+        break;
       }
+      room = await autoRollAndPost({ roomCode, room, needsRoll });
       continue; // chain
     }
 
@@ -363,19 +388,21 @@ export async function runDmTurn({ roomCode, room: initialRoom, hostUid, isRerun 
 
   // Commit the staged action prompt at the END of the chain. If the DM never
   // emitted options on any step, clear any prior stale prompt + votes.
+  // clearVotes also wipes the "__resolved" sentinel so a fresh group vote
+  // starts clean.
   try {
     if (chainOptionsStaged.length) {
       const nextUid = chainNextUidHint || lastMechanics?.nextTurn || nextTurnUid(room.turnOrder, room.currentTurn);
       const forUid = chainOptionMode === "individual"
         ? (nextUid && room.players?.[nextUid] && nextUid !== "__party__" ? nextUid : null)
         : null;
+      await clearVotes(roomCode); // do this BEFORE setting the new prompt
       await setActionPrompt(roomCode, {
         options: chainOptionsStaged,
         optionMode: chainOptionMode,
         forUid,
         openedAt: Date.now(),
       });
-      await clearVotes(roomCode);
     } else {
       await setActionPrompt(roomCode, null);
       await clearVotes(roomCode);

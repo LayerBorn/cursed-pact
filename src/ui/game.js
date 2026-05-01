@@ -127,16 +127,38 @@ async function sendAction() {
   const my = lastRoom?.players?.[currentUid()];
   if (!my) { toast("Not in this room.", "error"); return; }
 
-  if (lastRoom?.actionPrompt?.optionMode === "group") {
+  // Turn gate — only the current-turn player (or anyone during a group vote)
+  // can submit. Otherwise the DM ends up addressing whoever spoke instead of
+  // the actual current-turn player.
+  const me = currentUid();
+  const cur = lastRoom?.currentTurn;
+  const promptMode = lastRoom?.actionPrompt?.optionMode;
+  const promptFor = lastRoom?.actionPrompt?.forUid;
+  const inGroupVote = promptMode === "group";
+  const promptIsForMe = promptFor === me;
+  const isMyTurn = cur === me;
+  if (cur && !isMyTurn && !inGroupVote && !promptIsForMe) {
+    const turnOwner = lastRoom?.players?.[cur];
+    const ownerName = turnOwner?.character?.name || turnOwner?.name || "someone else";
+    toast(`Wait your turn — it's ${ownerName}'s.`, "warn");
+    return;
+  }
+
+  if (inGroupVote) {
     toast("Group vote in progress — submitting freeform overrides the vote.", "warn");
   }
+
+  // Annotate the message if it references abilities the player doesn't have.
+  // The DM still receives the player's original text, but the annotation
+  // pre-empts ability hallucination.
+  const annotation = abilityValidationNote(text, my.character);
 
   await runWithLock(async () => {
     await submitPlayerAction({
       roomCode,
       uid: currentUid(),
       name: my.name,
-      content: text,
+      content: annotation ? `${text}\n\n${annotation}` : text,
       rolls: [],
     });
     rememberSubmission(text);
@@ -146,17 +168,77 @@ async function sendAction() {
   });
 }
 
+// Scan the player's freeform text for ability-name references. If they name
+// something that's NOT in their own list, append a private note for the DM
+// telling them not to honor it. Helps small local models that ignore the
+// system prompt's "refuse abilities not in their list" rule.
+function abilityValidationNote(text, character) {
+  if (!text || !character) return null;
+  const myAbilities = Array.isArray(character.abilities) ? character.abilities : [];
+  const myNames = new Set(myAbilities.map((a) => (a.name || "").toLowerCase().trim()).filter(Boolean));
+  // Only check for KNOWN canon JJK abilities or names of abilities other
+  // players have. Don't reject random verbs.
+  const allRoomAbilities = collectAllRoomAbilities();
+  const lower = text.toLowerCase();
+  const cited = [];
+  for (const name of allRoomAbilities) {
+    if (!name) continue;
+    if (myNames.has(name)) continue;
+    // word-boundary-ish match — name appears in text and isn't a substring of a longer word
+    const re = new RegExp(`(^|[^a-z])${escapeRegex(name)}([^a-z]|$)`, "i");
+    if (re.test(lower)) cited.push(name);
+  }
+  if (!cited.length) return null;
+  return `[SYSTEM NOTE TO DM: this player named "${cited[0]}" but it is NOT in their ability list. Refuse it in-character; remind them their actual abilities are: ${myAbilities.map(a => a.name).join(", ") || "(none)"}. Do NOT apply CE cost.]`;
+}
+
+function collectAllRoomAbilities() {
+  const set = new Set();
+  for (const p of Object.values(lastRoom?.players || {})) {
+    const c = p.character;
+    if (!c || !Array.isArray(c.abilities)) continue;
+    for (const a of c.abilities) {
+      if (a && a.name) set.add(a.name.toLowerCase().trim());
+    }
+  }
+  // Plus a curated short-list of canon JJK moves the local model loves to
+  // hallucinate. Keep this list small to avoid false-positive flagging
+  // generic words.
+  for (const canon of ["divergent fist", "black flash", "hollow purple", "limitless", "infinity", "blue", "red", "lapse", "reversal", "domain expansion", "malevolent shrine"]) {
+    set.add(canon);
+  }
+  return set;
+}
+
+function escapeRegex(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 async function submitOption(optionText) {
   if (actionInFlight) return;
   if (isDuplicateSubmission(optionText)) { toast("Already sent that.", "warn"); return; }
   const my = lastRoom?.players?.[currentUid()];
   if (!my) return;
+
+  // Turn gate. In individual mode the prompt's forUid is authoritative; in
+  // group mode anyone can vote; without a prompt, currentTurn is the gate.
+  const me = currentUid();
+  const promptMode = lastRoom?.actionPrompt?.optionMode;
+  const promptFor = lastRoom?.actionPrompt?.forUid;
+  if (promptMode === "individual" && promptFor && promptFor !== me) {
+    toast("Not your turn.", "warn");
+    return;
+  }
+
+  // Same ability-validation note as freeform.
+  const annotation = abilityValidationNote(optionText, my.character);
+
   await runWithLock(async () => {
     await submitPlayerAction({
       roomCode,
       uid: currentUid(),
       name: my.name,
-      content: optionText,
+      content: annotation ? `${optionText}\n\n${annotation}` : optionText,
       rolls: [],
     });
     rememberSubmission(optionText);
@@ -819,6 +901,25 @@ function renderTurnState(room) {
   const me = currentUid();
   const myTurn = room.currentTurn === me;
   $("#game-turn-badge").classList.toggle("hidden", !myTurn);
+
+  // Disable the action input + send button when it's not this player's turn
+  // and there's no group vote / individual prompt directed at them. Stops
+  // people typing during someone else's beat.
+  const promptMode = room.actionPrompt?.optionMode;
+  const promptFor = room.actionPrompt?.forUid;
+  const inGroupVote = promptMode === "group";
+  const promptIsForMe = promptFor === me;
+  const canSubmit = !room.currentTurn || myTurn || inGroupVote || promptIsForMe;
+
+  const ti = $("#action-input");
+  const sendBtn = $("#btn-send");
+  if (ti && !actionInFlight) {
+    ti.disabled = !canSubmit;
+    ti.placeholder = canSubmit
+      ? "Describe what your sorcerer does…"
+      : "Wait — it's not your turn.";
+  }
+  if (sendBtn && !actionInFlight) sendBtn.disabled = !canSubmit;
 }
 
 function truncate(s, n) {
