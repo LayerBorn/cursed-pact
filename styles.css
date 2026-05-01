@@ -1105,3 +1105,154 @@ button.primary:hover:not(:disabled) {
 .saved-build-name { font-weight: 600; color: var(--text); }
 .saved-build-grade { font-size: 0.72rem; color: var(--muted); }
 .saved-build-tech { margin-top: 2px; }
+
+/* ──────────────────────────────────────────────────────────────────
+   Verification banner (lobby)
+   ────────────────────────────────────────────────────────────────── */
+.verify-banner {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  margin-bottom: 16px;
+  background: linear-gradient(120deg, rgba(255, 184, 77, 0.14), rgba(255, 184, 77, 0.04));
+  border: 1px solid rgba(255, 184, 77, 0.35);
+  border-radius: 10px;
+  text-align: left;
+  font-size: 0.86rem;
+}
+.verify-banner.hidden { display: none; }
+.verify-icon {
+  font-size: 1.3rem;
+  color: var(--warn);
+}
+.verify-text { flex: 1; }
+.verify-text strong { color: var(--warn); margin-right: 6px; }
+.verify-banner button { width: auto; margin: 0; }
+
+/* ──────────────────────────────────────────────────────────────────
+   Avatar
+   ────────────────────────────────────────────────────────────────── */
+.account-avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  font-weight: 700;
+  font-size: 1.3rem;
+  letter-spacing: 0.04em;
+  flex-shrink: 0;
+  box-shadow: var(--shadow-sm);
+}
+.account-avatar.small {
+  width: 36px; height: 36px;
+  font-size: 0.9rem;
+}
+
+/* Lobby clickable account row */
+.lobby-account-row {
+  align-items: center;
+}
+.lobby-account-info {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  width: auto;
+  margin: 0;
+  text-align: left;
+  color: var(--text);
+  transition: all var(--transition);
+}
+.lobby-account-info:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: rgba(138, 92, 255, 0.05);
+}
+.lobby-account-info:disabled { cursor: default; opacity: 0.85; }
+.lobby-account-text { display: flex; flex-direction: column; gap: 2px; line-height: 1.2; }
+
+/* ──────────────────────────────────────────────────────────────────
+   Account settings view
+   ────────────────────────────────────────────────────────────────── */
+#view-account .card { max-width: 520px; }
+.account-info {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 8px 0 18px;
+}
+.account-details { display: flex; flex-direction: column; gap: 4px; }
+.account-email { font-weight: 600; }
+.account-verified-tag { color: var(--warn); }
+.account-verified-tag.verified { color: var(--good); }
+
+h2.small { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); margin: 18px 0 4px; }
+h2.small.danger { color: var(--danger); }
+
+button.danger-btn {
+  width: 100%;
+  margin-top: 10px;
+  background: transparent;
+  border: 1px solid var(--danger);
+  color: var(--danger);
+  border-radius: 8px;
+  padding: 10px 16px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+button.danger-btn:hover { background: var(--danger); color: white; }
+
+#account-status.error { color: var(--danger); }
+
+/* ──────────────────────────────────────────────────────────────────
+   Manual ability editor inside the build editor
+   ────────────────────────────────────────────────────────────────── */
+.stat-editor {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin: 8px 0 14px;
+}
+.stat-cell { margin: 0; font-size: 0.78rem; }
+.stat-cell input { margin-top: 4px; }
+
+.ability-edit-row {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px;
+  margin-bottom: 8px;
+}
+.ability-row-top {
+  display: flex; gap: 6px; align-items: center; margin-bottom: 6px;
+}
+.ability-row-top input[type="text"] { flex: 1; margin-top: 0; }
+.ability-cost-label { font-size: 0.78rem; color: var(--muted); }
+.ability-cost-input { width: 64px; margin: 0; }
+.ability-edit-row textarea { margin-top: 0; }
+.btn-ability-remove {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  margin: 0;
+  border-radius: 4px;
+  font-size: 1rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.btn-ability-remove:hover { background: var(--danger); color: white; border-color: var(--danger); }
+
+#btn-add-ability { width: auto; margin-top: 4px; }
+.build-editor-actions { flex-wrap: wrap; }
+.build-editor-actions button { flex: 1 1 auto; min-width: 120px; }

@@ -6,6 +6,10 @@ import { initGame, joinRoom } from "./ui/game.js";
 import { initAuth, doSignOut } from "./ui/auth.js";
 import { initBuilds, showBuildsList, leaveBuildsList, initBuildEditor, openBuildEditor } from "./ui/builds.js";
 import {
+  initAccount, showAccountView,
+  initVerifyBanner, renderVerifyBanner, handleVerifyParam,
+} from "./ui/account.js";
+import {
   initFirebase, authReady, currentUid, onAuthChange, signInAsGuest,
 } from "./firebase.js";
 import { cpIsSignedIn, cpRefreshMe, onCpAuthChange } from "./cpApi.js";
@@ -178,13 +182,28 @@ function bootBuilds() {
   });
 }
 
+function bootAccount() {
+  initAccount({
+    onBack: () => { show("view-lobby"); },
+    onAccountDeleted: () => { show("view-auth"); },
+  });
+  initVerifyBanner();
+  // Expose for lobby's "click avatar" wiring.
+  window.__app.openAccount = () => showAccountView();
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
   bootKeyGate();
   bootAuth();
   bootBuilds();
+  bootAccount();
   bootLobby();
   bootCharacter();
   bootGame();
+
+  // Handle ?verify= and ?reset= query params from email links BEFORE routing,
+  // so the user lands in the right view with feedback.
+  await handleVerifyParam();
 
   try { initFirebase(); }
   catch (err) {
@@ -206,6 +225,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     const hasGuest = Boolean(currentUid());
     if (hasCpAccount || hasGuest) {
       setLobbyUid(currentUid());
+      renderVerifyBanner();
       const onAuth = document.getElementById("view-auth").classList.contains("active");
       if (onAuth) show("view-lobby");
     } else {

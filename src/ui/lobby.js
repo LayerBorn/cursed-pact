@@ -8,6 +8,7 @@ import {
   createRoom,
 } from "../firebase.js";
 import { cpIsSignedIn, cpUser } from "../cpApi.js";
+import { avatarLetters, avatarColorFor } from "./account.js";
 import { hostHasDmProvider } from "../gemini.js";
 
 export function initLobby({ onJoin, onMyBuilds, onSignOut }) {
@@ -72,6 +73,10 @@ export function initLobby({ onJoin, onMyBuilds, onSignOut }) {
   $("#btn-sign-out").addEventListener("click", () => {
     onSignOut && onSignOut();
   });
+
+  $("#btn-account-open").addEventListener("click", () => {
+    if (window.__app?.openAccount) window.__app.openAccount();
+  });
 }
 
 export function setLobbyUid(_uid) {
@@ -79,11 +84,23 @@ export function setLobbyUid(_uid) {
   const badge = document.getElementById("lobby-uid-badge");
   const myBuildsBtn = document.getElementById("btn-my-builds");
   const anonHint = document.getElementById("lobby-anon-hint");
+  const accountBtn = document.getElementById("btn-account-open");
+  const avatar = document.getElementById("lobby-avatar");
   const guest = !cpIsSignedIn();
   const u = cpUser();
   const display = u?.displayName || u?.email?.split("@")[0] || "Guest";
   if (nameEl) nameEl.textContent = display;
-  if (badge) badge.textContent = guest ? "(guest)" : "";
+  if (badge) badge.textContent = guest ? "(guest)" : (u?.verified ? "" : "(unverified)");
   if (myBuildsBtn) myBuildsBtn.disabled = guest;
   if (anonHint) anonHint.classList.toggle("hidden", !guest);
+  if (accountBtn) accountBtn.disabled = guest;
+  if (avatar) {
+    if (guest) {
+      avatar.textContent = "?";
+      avatar.style.background = "var(--surface3)";
+    } else {
+      avatar.textContent = avatarLetters(u);
+      avatar.style.background = avatarColorFor(u);
+    }
+  }
 }

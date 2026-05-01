@@ -149,6 +149,38 @@ export function initBuildEditor({ onSaved, onCancel }) {
   // Char counters
   bindCounter("build-technique", "build-technique-counter", 400);
   bindCounter("build-domain", "build-domain-counter", 300);
+  bindCounter("build-backstory", "build-backstory-counter", 1500);
+  bindCounter("build-personality", "build-personality-counter", 500);
+
+  // Show the manual editor (stats + abilities) when "Edit manually" is clicked.
+  $("#btn-build-manual").addEventListener("click", () => {
+    if (!editingPreview) editingPreview = { stats: { phys: 12, tech: 12, spirit: 12 }, abilities: [] };
+    renderPreview(editingPreview);
+    $("#build-editor-status").textContent = "Editing manually. Add abilities, tweak stats, then Save.";
+  });
+
+  // Add a blank ability row to the manual editor.
+  $("#btn-add-ability").addEventListener("click", () => {
+    if (!editingPreview) editingPreview = { stats: { phys: 12, tech: 12, spirit: 12 }, abilities: [] };
+    if (editingPreview.abilities.length >= 4) {
+      toast("Max 4 abilities per build.", "warn");
+      return;
+    }
+    editingPreview.abilities.push({ name: "", cost: 10, effect: "" });
+    renderPreview(editingPreview);
+  });
+
+  // Stat inputs sync into editingPreview.stats.
+  for (const stat of ["phys", "tech", "spirit"]) {
+    const inp = document.getElementById(`stat-${stat}-input`);
+    if (inp) {
+      inp.addEventListener("input", () => {
+        if (!editingPreview) editingPreview = { stats: { phys: 12, tech: 12, spirit: 12 }, abilities: [] };
+        const v = Math.max(1, Math.min(20, Math.round(Number(inp.value) || 12)));
+        editingPreview.stats = { ...(editingPreview.stats || {}), [stat]: v };
+      });
+    }
+  }
 
   // Generate stats + abilities
   $("#btn-build-generate").addEventListener("click", async () => {
@@ -188,17 +220,32 @@ export function initBuildEditor({ onSaved, onCancel }) {
     const grade = $("#build-grade").value;
     const technique = ($("#build-technique").value || "").trim();
     const domain = ($("#build-domain").value || "").trim();
+    const backstory = ($("#build-backstory").value || "").trim();
+    const personality = ($("#build-personality").value || "").trim();
     if (!name) { toast("Give the build a name.", "warn"); return; }
     if (!technique) { toast("Describe a cursed technique.", "warn"); return; }
-    if (findProfanity(name) || findProfanity(technique) || findProfanity(domain)) {
-      toast("Profanity detected — please rephrase.", "error"); return;
+    for (const [field, val] of [["name", name], ["technique", technique], ["domain", domain], ["backstory", backstory], ["personality", personality]]) {
+      if (findProfanity(val)) { toast(`Profanity detected in ${field} — please rephrase.`, "error"); return; }
     }
 
-    // Construct the saved character record.
+    // Capture any in-progress manual-editor abilities that haven't been
+    // re-rendered yet (text input still focused).
+    syncManualAbilities();
+
     const base = buildCharacter({ name, grade, technique, domain });
+    const cleanedAbilities = (editingPreview?.abilities || [])
+      .map(a => ({
+        name: (a.name || "").trim().slice(0, 40),
+        cost: Math.max(0, Math.min(80, Math.round(Number(a.cost) || 0))),
+        effect: (a.effect || "").trim().slice(0, 200),
+      }))
+      .filter(a => a.name && a.effect);
+
     const saved = {
       ...base,
-      ...(editingPreview?.abilities ? { abilities: editingPreview.abilities } : {}),
+      backstory,
+      personality,
+      ...(cleanedAbilities.length ? { abilities: cleanedAbilities } : {}),
       ...(editingPreview?.stats ? { stats: editingPreview.stats } : {}),
     };
 
@@ -232,10 +279,17 @@ export async function openBuildEditor({ buildId } = {}) {
         $("#build-grade").value = b.grade || "Grade 3";
         $("#build-technique").value = b.technique || "";
         $("#build-domain").value = b.domain || "";
+        $("#build-backstory").value = b.backstory || "";
+        $("#build-personality").value = b.personality || "";
         $("#build-technique").dispatchEvent(new Event("input"));
         $("#build-domain").dispatchEvent(new Event("input"));
+        $("#build-backstory").dispatchEvent(new Event("input"));
+        $("#build-personality").dispatchEvent(new Event("input"));
         if (Array.isArray(b.abilities) && b.abilities.length) {
-          editingPreview = { abilities: b.abilities, stats: b.stats || null };
+          editingPreview = {
+            abilities: b.abilities.map(a => ({ ...a })),
+            stats: b.stats ? { ...b.stats } : { phys: 12, tech: 12, spirit: 12 },
+          };
           renderPreview(editingPreview);
         }
       }
@@ -244,35 +298,80 @@ export async function openBuildEditor({ buildId } = {}) {
     }
   } else {
     // Reset for new build
-    $("#build-name").value = "";
+    for (const id of ["build-name","build-technique","build-domain","build-backstory","build-personality"]) {
+      const el = document.getElementById(id);
+      if (el) { el.value = ""; el.dispatchEvent(new Event("input")); }
+    }
     $("#build-grade").value = "Grade 3";
-    $("#build-technique").value = "";
-    $("#build-domain").value = "";
-    $("#build-technique").dispatchEvent(new Event("input"));
-    $("#build-domain").dispatchEvent(new Event("input"));
   }
   show("view-build-editor");
 }
 
 function renderPreview(preview) {
-  const statsRoot = $("#build-preview-stats");
-  const abilitiesRoot = $("#build-preview-abilities");
   $("#build-preview").classList.remove("hidden");
-  if (preview?.stats) {
-    statsRoot.textContent = `Stats — Phys ${preview.stats.phys} · Tech ${preview.stats.tech} · Spirit ${preview.stats.spirit}`;
-  } else {
-    statsRoot.textContent = "";
+  // Stat inputs reflect the saved stats but stay editable.
+  for (const stat of ["phys", "tech", "spirit"]) {
+    const inp = document.getElementById(`stat-${stat}-input`);
+    if (inp) inp.value = preview?.stats?.[stat] ?? 12;
   }
-  abilitiesRoot.innerHTML = "";
-  if (Array.isArray(preview?.abilities)) {
-    for (const a of preview.abilities) {
-      abilitiesRoot.appendChild(el("div", { class: "builds-ability-row" }, [
-        el("span", { class: "builds-ability-name" }, escapeHtml(a.name)),
-        el("span", { class: "builds-ability-cost" }, `${a.cost} CE`),
-        el("div", { class: "builds-ability-effect muted small" }, escapeHtml(a.effect)),
-      ]));
-    }
+  const root = $("#build-ability-editor");
+  if (!root) return;
+  root.innerHTML = "";
+  const abilities = Array.isArray(preview?.abilities) ? preview.abilities : [];
+  abilities.forEach((a, idx) => {
+    const row = el("div", { class: "ability-edit-row" });
+    const nameInp = el("input", { type: "text", maxlength: "40", placeholder: "Ability name" });
+    nameInp.value = a.name || "";
+    nameInp.addEventListener("input", () => { editingPreview.abilities[idx].name = nameInp.value; });
+    const costInp = el("input", { type: "number", min: "0", max: "80", class: "ability-cost-input" });
+    costInp.value = a.cost ?? 10;
+    costInp.addEventListener("input", () => { editingPreview.abilities[idx].cost = Number(costInp.value) || 0; });
+    const effectInp = el("textarea", { rows: "2", maxlength: "200", placeholder: "Effect description" });
+    effectInp.value = a.effect || "";
+    effectInp.addEventListener("input", () => { editingPreview.abilities[idx].effect = effectInp.value; });
+    const removeBtn = el("button", {
+      type: "button", class: "btn-ability-remove", title: "Remove ability",
+      onclick: () => {
+        editingPreview.abilities.splice(idx, 1);
+        renderPreview(editingPreview);
+      },
+    }, "×");
+
+    row.appendChild(el("div", { class: "ability-row-top" }, [
+      nameInp,
+      el("span", { class: "ability-cost-label" }, "CE:"),
+      costInp,
+      removeBtn,
+    ]));
+    row.appendChild(effectInp);
+    root.appendChild(row);
+  });
+  if (!abilities.length) {
+    root.appendChild(el("p", { class: "muted small" }, "No abilities yet — generate from AI or click + Add ability."));
   }
+}
+
+// Re-read the manual editor inputs into editingPreview.abilities (covers the
+// case where the user clicks Save while still focused inside an input).
+function syncManualAbilities() {
+  if (!editingPreview) return;
+  const root = $("#build-ability-editor");
+  if (!root) return;
+  const rows = root.querySelectorAll(".ability-edit-row");
+  if (!rows.length) return;
+  const next = [];
+  rows.forEach((row, idx) => {
+    const nameInp = row.querySelector('input[type="text"]');
+    const costInp = row.querySelector('input[type="number"]');
+    const effectInp = row.querySelector("textarea");
+    if (!nameInp || !costInp || !effectInp) return;
+    next.push({
+      name: nameInp.value || "",
+      cost: Number(costInp.value) || 0,
+      effect: effectInp.value || "",
+    });
+  });
+  editingPreview.abilities = next;
 }
 
 function bindCounter(inputId, counterId, max) {

@@ -14,6 +14,53 @@
     <!-- Toast container -->
     <div id="toasts" aria-live="polite"></div>
 
+    <!-- ============ ACCOUNT SETTINGS ============ -->
+    <section id="view-account" class="view">
+      <div class="card">
+        <header class="builds-header">
+          <h1 class="title small">Account settings</h1>
+          <button id="btn-account-back" class="ghost small">Back</button>
+        </header>
+        <div class="divider"></div>
+
+        <div class="account-info">
+          <div class="account-avatar" id="account-avatar">?</div>
+          <div class="account-details">
+            <div id="account-email" class="account-email">—</div>
+            <div id="account-verified-tag" class="account-verified-tag muted small">Unverified</div>
+          </div>
+        </div>
+
+        <h2 class="small">Display name</h2>
+        <label>
+          <input id="account-display-name" type="text" maxlength="32" />
+        </label>
+        <button id="btn-account-save-name" class="secondary">Save name</button>
+
+        <div class="divider"></div>
+
+        <h2 class="small">Change password</h2>
+        <label>Current password
+          <input id="account-current-pw" type="password" autocomplete="current-password" />
+        </label>
+        <label>New password (min 6)
+          <input id="account-new-pw" type="password" autocomplete="new-password" />
+        </label>
+        <button id="btn-account-change-pw" class="secondary">Change password</button>
+
+        <div class="divider"></div>
+
+        <h2 class="small danger">Delete account</h2>
+        <p class="muted small">Permanent. Wipes all your saved builds. Requires your current password.</p>
+        <label>Confirm password
+          <input id="account-delete-pw" type="password" autocomplete="current-password" />
+        </label>
+        <button id="btn-account-delete" class="danger-btn">Delete my account</button>
+
+        <p id="account-status" class="muted small"></p>
+      </div>
+    </section>
+
     <!-- ============ AUTH (sign in / sign up / guest) ============ -->
     <section id="view-auth" class="view">
       <div class="card centered">
@@ -117,16 +164,32 @@
           <div class="char-counter" id="build-domain-counter">0 / 300</div>
         </label>
 
-        <!-- Generated stats + abilities preview -->
+        <label class="optional">Backstory <span class="muted small">(optional, the DM uses this for flavor)</span>
+          <textarea id="build-backstory" rows="3" maxlength="1500" placeholder="Where did your sorcerer grow up? What scarred them?"></textarea>
+          <div class="char-counter" id="build-backstory-counter">0 / 1500</div>
+        </label>
+
+        <label class="optional">Personality / quirks <span class="muted small">(optional)</span>
+          <textarea id="build-personality" rows="2" maxlength="500" placeholder="Cocky. Hates loud noises. Refuses to fight on Sundays."></textarea>
+          <div class="char-counter" id="build-personality-counter">0 / 500</div>
+        </label>
+
+        <!-- Generated stats + abilities preview, with manual editor -->
         <div id="build-preview" class="build-preview hidden">
           <div class="divider"></div>
-          <h2>Generated</h2>
-          <div id="build-preview-stats" class="muted small"></div>
-          <div id="build-preview-abilities" class="builds-ability-list"></div>
+          <h2>Stats &amp; abilities</h2>
+          <div class="stat-editor" id="build-stat-editor">
+            <label class="stat-cell">Phys <input id="stat-phys-input" type="number" min="1" max="20" value="12" /></label>
+            <label class="stat-cell">Tech <input id="stat-tech-input" type="number" min="1" max="20" value="12" /></label>
+            <label class="stat-cell">Spirit <input id="stat-spirit-input" type="number" min="1" max="20" value="12" /></label>
+          </div>
+          <div id="build-ability-editor" class="builds-ability-list"></div>
+          <button id="btn-add-ability" class="ghost small">+ Add ability</button>
         </div>
 
         <div class="build-editor-actions">
-          <button id="btn-build-generate" class="secondary">Generate stats & abilities</button>
+          <button id="btn-build-generate" class="secondary">Generate stats &amp; abilities (AI)</button>
+          <button id="btn-build-manual" class="ghost">Edit manually</button>
           <button id="btn-build-save" class="primary">Save build</button>
         </div>
         <p id="build-editor-status" class="muted small"></p>
@@ -199,6 +262,18 @@
     <!-- ============ LOBBY ============ -->
     <section id="view-lobby" class="view">
       <div class="card centered">
+
+        <!-- Verification banner — shown when signed-in user hasn't verified email yet. -->
+        <div id="verify-banner" class="verify-banner hidden">
+          <span class="verify-icon">✉</span>
+          <div class="verify-text">
+            <strong>Verify your email.</strong>
+            <span class="muted small" id="verify-banner-msg">We sent a link to your inbox.</span>
+          </div>
+          <button id="btn-verify-resend" class="ghost small">Resend</button>
+          <button id="btn-verify-dismiss" class="ghost small" title="Hide for this session">×</button>
+        </div>
+
         <h1 class="title">Cursed Pact</h1>
         <p class="subtitle muted">Form a party of jujutsu sorcerers. The DM is an AI.</p>
         <div class="divider"></div>
@@ -237,10 +312,13 @@
 
         <div class="divider"></div>
         <div class="lobby-account-row">
-          <div class="lobby-account-info">
-            Signed in as <strong id="lobby-display-name">…</strong>
-            <span class="muted small" id="lobby-uid-badge"></span>
-          </div>
+          <button id="btn-account-open" class="lobby-account-info" type="button" title="Account settings">
+            <span class="account-avatar small" id="lobby-avatar">?</span>
+            <span class="lobby-account-text">
+              <span><strong id="lobby-display-name">…</strong> <span class="muted small" id="lobby-uid-badge"></span></span>
+              <span class="muted small">Click to manage account</span>
+            </span>
+          </button>
           <div class="lobby-account-actions">
             <button id="btn-my-builds" class="ghost small">My builds</button>
             <button id="btn-change-key" class="ghost small">DM provider</button>

@@ -152,6 +152,28 @@ export async function cpDeleteBuild(buildId) {
   await api(`/api/cp/builds/${encodeURIComponent(buildId)}`, { method: "DELETE" });
 }
 
+// ─────────────── Email verification ───────────────
+export async function cpVerifyEmail(token) {
+  return api("/api/cp/auth/verify", { method: "POST", auth: false, body: { token } });
+}
+export async function cpResendVerification() {
+  return api("/api/cp/auth/resend-verification", { method: "POST" });
+}
+
+// ─────────────── Account management ───────────────
+export async function cpUpdateDisplayName(displayName) {
+  const data = await api("/api/cp/auth/me", { method: "PATCH", body: { displayName } });
+  if (_user) { _user = { ..._user, displayName: data.displayName }; persist(); notify(); }
+  return data;
+}
+export async function cpChangePassword({ currentPassword, newPassword }) {
+  return api("/api/cp/auth/change-password", { method: "POST", body: { currentPassword, newPassword } });
+}
+export async function cpDeleteAccount(password) {
+  await api("/api/cp/auth/me", { method: "DELETE", body: { password } });
+  _token = null; _user = null; persist(); notify();
+}
+
 // ─────────────── Health / connectivity ───────────────
 export async function cpHealthCheck() {
   try {
