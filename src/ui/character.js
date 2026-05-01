@@ -269,36 +269,69 @@ async function useSavedBuild(build) {
   const roomCode = window.__app.currentRoomCode;
   if (!roomCode) { toast("No active room.", "error"); return; }
 
-  // If the room has a locked grade, force the build's grade.
+  // Decide the actual joining grade. A locked room overrides the build's grade.
   const lockedGrade = window.__app.lockedGrade;
+  const buildGrade = build.grade || "Grade 3";
+  const joiningGrade = lockedGrade || buildGrade;
+  const gradeMismatch = lockedGrade && lockedGrade !== buildGrade;
+
+  // Pull the matching HP/CE pool for the joining grade so the player isn't
+  // sitting at "Grade 1 maxHp" while playing as a Grade 4.
+  const baseGradePool = STARTER_GRADE_HP_FOR(joiningGrade);
+
   const character = {
     name: build.name,
-    grade: lockedGrade || build.grade || "Grade 3",
+    grade: joiningGrade,
     technique: build.technique || "",
     domain: build.domain || "",
+    backstory: build.backstory || "",
+    personality: build.personality || "",
     stats: build.stats || { phys: 12, tech: 12, spirit: 12 },
     abilities: Array.isArray(build.abilities) ? build.abilities : [],
-    hp: build.hp ?? 90,
-    maxHp: build.maxHp ?? 90,
-    cursedEnergy: build.cursedEnergy ?? 80,
-    maxCursedEnergy: build.maxCursedEnergy ?? 80,
+    hp: baseGradePool.hp,
+    maxHp: baseGradePool.hp,
+    cursedEnergy: baseGradePool.ce,
+    maxCursedEnergy: baseGradePool.ce,
     statusEffects: [],
     items: [],
     xp: build.xp || 0,
   };
-  // Reset HP/CE to full when reused.
-  character.hp = character.maxHp;
-  character.cursedEnergy = character.maxCursedEnergy;
-  character.statusEffects = [];
+
+  // If the room forced a different grade, flag the character for the host
+  // to auto-rebalance. The host's listener picks this up and regenerates
+  // abilities + stats at the joining grade.
+  if (gradeMismatch) {
+    character._rebalanceFrom = buildGrade;
+    character._needsRebalance = true;
+  }
 
   try {
     await addPlayer(roomCode, currentUid(), character);
-    toast(`Joined as ${character.name}.`, "ok");
+    toast(
+      gradeMismatch
+        ? `Joined as ${character.name}. Host will auto-rebalance from ${buildGrade} to ${joiningGrade}.`
+        : `Joined as ${character.name}.`,
+      "ok"
+    );
     onJoinedRef && onJoinedRef(roomCode);
   } catch (err) {
     console.error(err);
     toast(`Could not join with build: ${err.message}`, "error");
   }
+}
+
+// Per-grade HP/CE starter pools — duplicated from game/character.js so we
+// don't expose internal constants. Keep these in sync.
+function STARTER_GRADE_HP_FOR(grade) {
+  const table = {
+    "Grade 4":      { hp: 70,  ce: 60 },
+    "Grade 3":      { hp: 90,  ce: 80 },
+    "Grade 2":      { hp: 110, ce: 110 },
+    "Grade 1":      { hp: 140, ce: 150 },
+    "Semi-Grade 1": { hp: 130, ce: 140 },
+    "Special Grade":{ hp: 180, ce: 220 },
+  };
+  return table[grade] || table["Grade 3"];
 }
 
 function truncate(s, n) {

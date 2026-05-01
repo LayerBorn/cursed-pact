@@ -423,11 +423,11 @@ export async function submitPartyAction({ roomCode, content, count, total, optio
   // Don't clear here — the host will run runDmTurn which clears at chain start.
 }
 
-// Host-only: scan the party for any player whose character has a technique
-// but no abilities yet, and generate a set for them via Gemini. Runs one
-// player at a time to keep API quota predictable. Surfaces both successes
-// and failures as system messages so the host (and players) can see what
-// happened instead of having to open the console.
+// Host-only: scan the party for any player whose character either:
+//   (a) has a technique but no abilities yet, OR
+//   (b) is flagged with _needsRebalance because they joined with a saved
+//       build whose grade doesn't match the room's locked grade.
+// Generates / regenerates abilities + stats at the player's CURRENT grade.
 export async function generateMissingAbilities({ roomCode, room }) {
   if (!hostHasDmProvider()) return;
   const players = Object.values(room.players || {});
@@ -435,9 +435,13 @@ export async function generateMissingAbilities({ roomCode, room }) {
     const c = p.character;
     if (!c) continue;
     const tech = (c.technique || "").trim();
+    if (!tech || tech === "(undeclared technique)") continue;
+
+    const needsRebalance = !!c._needsRebalance;
     const hasAbilities = Array.isArray(c.abilities) && c.abilities.length > 0;
-    if (!tech || tech === "(undeclared technique)" || hasAbilities) continue;
-    await generateAbilitiesForPlayer({ roomCode, player: p });
+    if (!hasAbilities || needsRebalance) {
+      await generateAbilitiesForPlayer({ roomCode, player: p, isRebalance: needsRebalance });
+    }
   }
 }
 
@@ -454,7 +458,7 @@ export async function regenerateForPlayer({ roomCode, player }) {
   await generateAbilitiesForPlayer({ roomCode, player, forced: true });
 }
 
-async function generateAbilitiesForPlayer({ roomCode, player, forced = false }) {
+async function generateAbilitiesForPlayer({ roomCode, player, forced = false, isRebalance = false }) {
   const c = player.character || {};
   const tech = (c.technique || "").trim();
   if (!tech || tech === "(undeclared technique)") {
@@ -482,20 +486,26 @@ async function generateAbilitiesForPlayer({ roomCode, player, forced = false }) 
       ...c,
       ...(abilities.length ? { abilities } : {}),
       ...(stats ? { stats } : {}),
+      // Always clear the rebalance flags after a successful regen.
+      _needsRebalance: false,
+      _rebalanceFrom: null,
     };
     await updatePlayerCharacter(roomCode, player.uid, updated);
     const bits = [];
     if (abilities.length) bits.push(`abilities: ${abilities.map((a) => a.name).join(", ")}`);
     if (stats) bits.push(`stats: P${stats.phys}/T${stats.tech}/S${stats.spirit}`);
+    const verb = isRebalance ? "Rebalanced" : "Generated";
+    const fromTag = (isRebalance && c._rebalanceFrom && c._rebalanceFrom !== c.grade)
+      ? ` (${c._rebalanceFrom} → ${c.grade})` : "";
     await postMessage(roomCode, {
       author: "system", authorName: "system", type: "system",
-      content: `Generated for ${c.name} — ${bits.join(" · ")}`,
+      content: `${verb} for ${c.name}${fromTag} — ${bits.join(" · ")}`,
     });
   } catch (err) {
     console.warn("Ability gen failed for", player.uid, err);
     await postMessage(roomCode, {
       author: "system", authorName: "system", type: "system",
-      content: `Could not generate abilities for ${c.name || "player"}: ${err.message}. Host can click ↻ on their card to retry.`,
+      content: `Could not ${isRebalance ? "rebalance" : "generate"} abilities for ${c.name || "player"}: ${err.message}. Host can click ↻ on their card to retry.`,
     });
   }
 }

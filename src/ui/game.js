@@ -776,6 +776,7 @@ function hasPlayersMissingAbilities(room) {
     if (!c) return false;
     const tech = (c.technique || "").trim();
     if (!tech || tech === "(undeclared technique)") return false;
+    if (c._needsRebalance) return true;
     return !Array.isArray(c.abilities) || c.abilities.length === 0;
   });
 }
