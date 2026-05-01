@@ -24,6 +24,7 @@ import {
 } from "../game/room.js";
 import { XP_TO_NEXT } from "../game/character.js";
 import { findProfanity } from "../util/profanity.js";
+import { initDebugPanel, setDebugContext } from "./debug.js";
 
 const INACTIVE_AFTER_MS = 3 * 60 * 1000; // 3 min — long enough that "thinking" doesn't trigger it
 const HEARTBEAT_MS = 25 * 1000;
@@ -40,6 +41,9 @@ let abilityGenRunning = false;
 let voteResolveRunning = false;
 
 export function initGame({ onLeave }) {
+  // Debug panel hotkey — Ctrl+D / Cmd+D
+  initDebugPanel();
+
   $("#btn-leave").addEventListener("click", async () => {
     if (roomCode) {
       try { await setPlayerOnline(roomCode, currentUid(), false); } catch {}
@@ -171,6 +175,7 @@ export function joinRoom({ code, host }) {
       return;
     }
     lastRoom = room;
+    setDebugContext({ room, isHost });
     renderRoom(room);
 
     if (isHost && !abilityGenRunning && hasPlayersMissingAbilities(room)) {

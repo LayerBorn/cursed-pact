@@ -243,6 +243,11 @@ export async function postMessage(roomCode, message) {
 }
 
 export async function setCurrentTurn(roomCode, uid) {
+  // Debug log so turn transitions are inspectable in the console. The caller
+  // should pass a string-ish uid (or null between scenes).
+  try {
+    console.log(`[turn] → ${uid ?? "(none)"}  (room ${roomCode})`);
+  } catch {}
   await set(roomRef(roomCode, "currentTurn"), uid);
 }
 
