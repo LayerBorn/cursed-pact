@@ -14,6 +14,125 @@
     <!-- Toast container -->
     <div id="toasts" aria-live="polite"></div>
 
+    <!-- ============ AUTH (sign in / sign up / guest) ============ -->
+    <section id="view-auth" class="view">
+      <div class="card centered">
+        <h1 class="title">Cursed Pact</h1>
+        <p class="subtitle muted">Sign in to save sorcerers across rooms.</p>
+        <div class="divider"></div>
+
+        <div class="auth-tabs">
+          <label class="auth-tab">
+            <input type="radio" name="auth-mode" value="signin" checked /><span>Sign in</span>
+          </label>
+          <label class="auth-tab">
+            <input type="radio" name="auth-mode" value="signup" /><span>Create account</span>
+          </label>
+        </div>
+
+        <div id="auth-panel-signin" class="auth-panel">
+          <label>Email
+            <input id="signin-email" type="email" autocomplete="email" placeholder="you@example.com" />
+          </label>
+          <label>Password
+            <input id="signin-password" type="password" autocomplete="current-password" placeholder="••••••••" />
+          </label>
+          <button id="btn-signin" class="primary">Sign in</button>
+        </div>
+
+        <div id="auth-panel-signup" class="auth-panel hidden">
+          <label>Display name
+            <input id="signup-name" type="text" maxlength="32" placeholder="Yuji" />
+          </label>
+          <label>Email
+            <input id="signup-email" type="email" autocomplete="email" placeholder="you@example.com" />
+          </label>
+          <label>Password (min 6)
+            <input id="signup-password" type="password" autocomplete="new-password" minlength="6" placeholder="••••••••" />
+          </label>
+          <button id="btn-signup" class="primary">Create account</button>
+        </div>
+
+        <div class="divider"></div>
+        <button id="btn-guest" class="ghost">Continue as guest</button>
+        <p class="muted small" style="margin-top: 8px;">Guests can play but can't save builds across sessions.</p>
+        <p id="auth-status" class="muted small"></p>
+      </div>
+    </section>
+
+    <!-- ============ MY BUILDS ============ -->
+    <section id="view-builds" class="view">
+      <div class="card builds-card">
+        <header class="builds-header">
+          <div>
+            <h1 class="title small">My builds</h1>
+            <p class="muted small">Saved sorcerers — pick one when you join a room.</p>
+          </div>
+          <div class="builds-header-actions">
+            <button id="btn-builds-new" class="primary small">+ New build</button>
+            <button id="btn-builds-back" class="ghost small">Back to lobby</button>
+          </div>
+        </header>
+        <div class="divider"></div>
+        <div id="builds-list" class="builds-list"></div>
+        <p id="builds-empty" class="muted small hidden">No builds yet. Click "New build" to make one.</p>
+      </div>
+    </section>
+
+    <!-- ============ BUILD EDITOR ============ -->
+    <section id="view-build-editor" class="view">
+      <div class="card">
+        <header class="builds-header">
+          <h1 class="title small" id="build-editor-title">New build</h1>
+          <button id="btn-build-editor-back" class="ghost small">Cancel</button>
+        </header>
+        <div class="divider"></div>
+
+        <label>Name
+          <input id="build-name" type="text" maxlength="32" placeholder="Yuji Itadori" />
+        </label>
+
+        <label>Starting grade
+          <select id="build-grade">
+            <option value="Grade 4">Grade 4 (rookie)</option>
+            <option value="Grade 3" selected>Grade 3</option>
+            <option value="Grade 2">Grade 2</option>
+            <option value="Grade 1">Grade 1</option>
+            <option value="Semi-Grade 1">Semi-Grade 1</option>
+            <option value="Special Grade">Special Grade</option>
+          </select>
+        </label>
+
+        <label>Cursed technique
+          <textarea id="build-technique" rows="3" maxlength="400" placeholder="Describe your technique freely, or pick one below."></textarea>
+          <div class="char-counter" id="build-technique-counter">0 / 400</div>
+        </label>
+
+        <div class="technique-picker" id="build-technique-picker"></div>
+
+        <p class="muted small ai-stats-note">Stats and abilities will be generated from your technique.</p>
+
+        <label class="optional">Domain expansion <span class="muted small">(optional)</span>
+          <textarea id="build-domain" rows="2" maxlength="300" placeholder="e.g. Malevolent Shrine — a domain that does not need a barrier..."></textarea>
+          <div class="char-counter" id="build-domain-counter">0 / 300</div>
+        </label>
+
+        <!-- Generated stats + abilities preview -->
+        <div id="build-preview" class="build-preview hidden">
+          <div class="divider"></div>
+          <h2>Generated</h2>
+          <div id="build-preview-stats" class="muted small"></div>
+          <div id="build-preview-abilities" class="builds-ability-list"></div>
+        </div>
+
+        <div class="build-editor-actions">
+          <button id="btn-build-generate" class="secondary">Generate stats & abilities</button>
+          <button id="btn-build-save" class="primary">Save build</button>
+        </div>
+        <p id="build-editor-status" class="muted small"></p>
+      </div>
+    </section>
+
     <!-- ============ DM PROVIDER GATE (hosts only) ============ -->
     <section id="view-key" class="view">
       <div class="card centered">
@@ -117,13 +236,18 @@
         </div>
 
         <div class="divider"></div>
-        <p class="muted small">
-          You are signed in anonymously as
-          <code id="lobby-uid">…</code>.
-          <button id="btn-change-key" class="link">Manage Gemini key</button>
-          <span class="dot-sep">·</span>
-          <span>Joining a room? You don't need a key.</span>
-        </p>
+        <div class="lobby-account-row">
+          <div class="lobby-account-info">
+            Signed in as <strong id="lobby-display-name">…</strong>
+            <span class="muted small" id="lobby-uid-badge"></span>
+          </div>
+          <div class="lobby-account-actions">
+            <button id="btn-my-builds" class="ghost small">My builds</button>
+            <button id="btn-change-key" class="ghost small">DM provider</button>
+            <button id="btn-sign-out" class="ghost small">Sign out</button>
+          </div>
+        </div>
+        <p class="muted small" id="lobby-anon-hint">Joining a room? You don't need a DM key.</p>
       </div>
     </section>
 
@@ -133,6 +257,15 @@
         <h1 class="title">Choose your sorcerer</h1>
         <p class="muted">Room <code id="char-room-code">—</code></p>
         <div class="divider"></div>
+
+        <!-- "Use saved build" panel — only shown for signed-in users. -->
+        <div id="saved-build-panel" class="saved-build-panel hidden">
+          <h2 class="small">Use a saved build</h2>
+          <div id="saved-build-list" class="saved-build-list"></div>
+          <p id="saved-build-empty" class="muted small hidden">No saved builds match this room's grade.</p>
+          <div class="divider"></div>
+          <h2 class="small">Or build a fresh sorcerer</h2>
+        </div>
 
         <label>Name
           <input id="char-name" type="text" maxlength="32" placeholder="Yuji Itadori" />

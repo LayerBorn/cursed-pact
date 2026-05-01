@@ -1,10 +1,12 @@
-import { $, show, toast, el } from "./common.js";
+import { $, show, toast, el, escapeHtml } from "./common.js";
 import { STARTER_TECHNIQUES, buildCharacter } from "../game/character.js";
-import { addPlayer, currentUid, listenRoom } from "../firebase.js";
+import { addPlayer, currentUid, listenRoom, isAnonymous, listBuilds } from "../firebase.js";
 import { generateAbilities, hostHasDmProvider } from "../gemini.js";
 import { findProfanity } from "../util/profanity.js";
 
 let unsubscribeLockedGradeWatch = null;
+let onJoinedRef = null;
+let savedBuildsRoomGrade = null; // current room's locked grade, if any
 
 const DRAFT_STORAGE_KEY = "jjk_char_draft_v1";
 function saveDraft() {
@@ -29,6 +31,7 @@ function clearDraft() {
 }
 
 export function initCharacter({ onJoined }) {
+  onJoinedRef = onJoined;
   const picker = $("#technique-picker");
   picker.innerHTML = "";
   STARTER_TECHNIQUES.forEach((t) => {
@@ -183,7 +186,6 @@ export function setCharacterRoomCode(code) {
   const node = document.getElementById("char-room-code");
   if (node) node.textContent = code || "—";
 
-  // Watch the room for a locked grade and force-enable/disable the dropdown.
   if (unsubscribeLockedGradeWatch) {
     try { unsubscribeLockedGradeWatch(); } catch {}
     unsubscribeLockedGradeWatch = null;
@@ -192,19 +194,113 @@ export function setCharacterRoomCode(code) {
     window.__app.lockedGrade = null;
     return;
   }
-  unsubscribeLockedGradeWatch = listenRoom(code, (room) => {
+  unsubscribeLockedGradeWatch = listenRoom(code, async (room) => {
     if (!room) return;
     const locked = room.lockedGrade || null;
     window.__app.lockedGrade = locked;
+    savedBuildsRoomGrade = locked;
     const sel = document.getElementById("char-grade");
-    if (!sel) return;
-    if (locked) {
-      sel.value = locked;
-      sel.disabled = true;
-      sel.title = `Host locked grade to ${locked}`;
-    } else {
-      sel.disabled = false;
-      sel.title = "";
+    if (sel) {
+      if (locked) {
+        sel.value = locked;
+        sel.disabled = true;
+        sel.title = `Host locked grade to ${locked}`;
+      } else {
+        sel.disabled = false;
+        sel.title = "";
+      }
     }
+    // Refresh the saved-builds list whenever the locked grade changes.
+    await renderSavedBuilds();
   });
+}
+
+async function renderSavedBuilds() {
+  const panel = document.getElementById("saved-build-panel");
+  const list = document.getElementById("saved-build-list");
+  const empty = document.getElementById("saved-build-empty");
+  if (!panel || !list || !empty) return;
+
+  // Anonymous users have no builds.
+  if (isAnonymous() || !currentUid()) {
+    panel.classList.add("hidden");
+    return;
+  }
+
+  let builds = [];
+  try { builds = await listBuilds(currentUid()); } catch { builds = []; }
+  const lockedGrade = savedBuildsRoomGrade;
+  const matching = lockedGrade
+    ? builds.filter((b) => b.grade === lockedGrade)
+    : builds;
+
+  if (!builds.length) {
+    panel.classList.add("hidden");
+    return;
+  }
+  panel.classList.remove("hidden");
+  list.innerHTML = "";
+  if (!matching.length) {
+    empty.classList.remove("hidden");
+    empty.textContent = lockedGrade
+      ? `No saved builds match the locked grade (${lockedGrade}).`
+      : "No saved builds.";
+    return;
+  }
+  empty.classList.add("hidden");
+  for (const b of matching) {
+    const card = el("button", {
+      type: "button",
+      class: "saved-build-card",
+      onclick: () => useSavedBuild(b),
+    }, [
+      el("div", { class: "saved-build-title" }, [
+        el("span", { class: "saved-build-name" }, escapeHtml(b.name || "?")),
+        el("span", { class: "saved-build-grade" }, escapeHtml(b.grade || "Grade 3")),
+      ]),
+      el("div", { class: "saved-build-tech muted small" }, escapeHtml(truncate(b.technique || "(no technique)", 90))),
+    ]);
+    list.appendChild(card);
+  }
+}
+
+async function useSavedBuild(build) {
+  const roomCode = window.__app.currentRoomCode;
+  if (!roomCode) { toast("No active room.", "error"); return; }
+
+  // If the room has a locked grade, force the build's grade.
+  const lockedGrade = window.__app.lockedGrade;
+  const character = {
+    name: build.name,
+    grade: lockedGrade || build.grade || "Grade 3",
+    technique: build.technique || "",
+    domain: build.domain || "",
+    stats: build.stats || { phys: 12, tech: 12, spirit: 12 },
+    abilities: Array.isArray(build.abilities) ? build.abilities : [],
+    hp: build.hp ?? 90,
+    maxHp: build.maxHp ?? 90,
+    cursedEnergy: build.cursedEnergy ?? 80,
+    maxCursedEnergy: build.maxCursedEnergy ?? 80,
+    statusEffects: [],
+    items: [],
+    xp: build.xp || 0,
+  };
+  // Reset HP/CE to full when reused.
+  character.hp = character.maxHp;
+  character.cursedEnergy = character.maxCursedEnergy;
+  character.statusEffects = [];
+
+  try {
+    await addPlayer(roomCode, currentUid(), character);
+    toast(`Joined as ${character.name}.`, "ok");
+    onJoinedRef && onJoinedRef(roomCode);
+  } catch (err) {
+    console.error(err);
+    toast(`Could not join with build: ${err.message}`, "error");
+  }
+}
+
+function truncate(s, n) {
+  if (!s) return "";
+  return s.length > n ? s.slice(0, n - 1) + "…" : s;
 }

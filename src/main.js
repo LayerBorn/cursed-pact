@@ -3,7 +3,11 @@ import { $, show, toast } from "./ui/common.js";
 import { initLobby, setLobbyUid } from "./ui/lobby.js";
 import { initCharacter, setCharacterRoomCode } from "./ui/character.js";
 import { initGame, joinRoom } from "./ui/game.js";
-import { initFirebase, authReady, currentUid } from "./firebase.js";
+import { initAuth, doSignOut } from "./ui/auth.js";
+import { initBuilds, showBuildsList, leaveBuildsList, initBuildEditor, openBuildEditor } from "./ui/builds.js";
+import {
+  initFirebase, authReady, currentUid, onAuthChange, isAnonymous, userDisplayName,
+} from "./firebase.js";
 import {
   loadStoredKey, saveKey, clearKey,
   loadStoredProvider, saveProvider,
@@ -12,9 +16,12 @@ import {
 
 window.__app = {
   currentRoomCode: null,
-  // Where to return after the key gate is dismissed (default: lobby).
   returnViewAfterKey: "view-lobby",
 };
+
+// Expose helpers used from the builds list (which renders buttons that need
+// to open the editor).
+window.__app.editBuild = (buildId) => openBuildEditor({ buildId });
 
 function bootKeyGate() {
   const keyInput = $("#key-input");
@@ -22,7 +29,6 @@ function bootKeyGate() {
   const ollamaUrlInput = $("#ollama-url");
   const ollamaModelInput = $("#ollama-model");
 
-  // Hydrate from storage
   const storedKey = loadStoredKey();
   if (storedKey) {
     keyInput.value = storedKey;
@@ -32,7 +38,6 @@ function bootKeyGate() {
   ollamaUrlInput.value = ollCfg.url;
   ollamaModelInput.value = ollCfg.model;
 
-  // Pre-select the right tab
   const currentProvider = loadStoredProvider();
   document.querySelectorAll('input[name="provider"]').forEach((r) => {
     r.checked = r.value === currentProvider;
@@ -49,7 +54,6 @@ function bootKeyGate() {
     keyInput.type = e.target.checked ? "text" : "password";
   });
 
-  // Test the Ollama connection
   $("#ollama-test").addEventListener("click", async () => {
     const url = (ollamaUrlInput.value || "").trim().replace(/\/+$/, "");
     if (!url) { toast("Enter the Ollama URL.", "warn"); return; }
@@ -69,7 +73,6 @@ function bootKeyGate() {
 
   $("#key-save").addEventListener("click", async () => {
     const provider = (document.querySelector('input[name="provider"]:checked') || {}).value || "gemini";
-
     if (provider === "gemini") {
       const key = keyInput.value.trim();
       if (!key.startsWith("AIza") || key.length < 30) {
@@ -98,7 +101,7 @@ function bootKeyGate() {
   });
 
   $("#key-back").addEventListener("click", () => {
-    show("view-lobby");
+    show(window.__app.returnViewAfterKey || "view-lobby");
     window.__app.returnViewAfterKey = "view-lobby";
   });
 
@@ -123,6 +126,15 @@ function bootLobby() {
       setCharacterRoomCode(code);
       show("view-character");
     },
+    onMyBuilds: () => {
+      if (showBuildsList()) {
+        // Successfully shown
+      }
+    },
+    onSignOut: async () => {
+      await doSignOut();
+      show("view-auth");
+    },
   });
 }
 
@@ -145,21 +157,50 @@ function bootGame() {
   });
 }
 
-// Boot
+function bootAuth() {
+  initAuth({
+    onSignedIn: () => {
+      setLobbyUid(currentUid());
+      show("view-lobby");
+    },
+  });
+}
+
+function bootBuilds() {
+  initBuilds({
+    onBack: () => { leaveBuildsList(); show("view-lobby"); },
+    onCreate: () => openBuildEditor({}),
+  });
+  initBuildEditor({
+    onSaved: () => { show("view-builds"); },
+    onCancel: () => { show("view-builds"); },
+  });
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
   bootKeyGate();
+  bootAuth();
+  bootBuilds();
   bootLobby();
   bootCharacter();
   bootGame();
 
-  // Always boot to the lobby. The key gate is now on-demand for hosts only.
-  try {
-    initFirebase();
-    await authReady();
-    setLobbyUid(currentUid());
-    show("view-lobby");
-  } catch (err) {
+  try { initFirebase(); }
+  catch (err) {
     console.error(err);
     toast(`Firebase init failed: ${err.message}`, "error");
+    return;
   }
+
+  // Route based on auth state.
+  onAuthChange((user) => {
+    if (user) {
+      setLobbyUid(currentUid());
+      // Only auto-route to lobby if we're still on the auth view.
+      const onAuth = document.getElementById("view-auth").classList.contains("active");
+      if (onAuth) show("view-lobby");
+    } else {
+      show("view-auth");
+    }
+  });
 });

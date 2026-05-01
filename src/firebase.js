@@ -4,6 +4,10 @@ import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.5/fireba
 import {
   getAuth,
   signInAnonymously,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut as fbSignOut,
+  updateProfile as fbUpdateProfile,
   onAuthStateChanged,
 } from "https://www.gstatic.com/firebasejs/10.12.5/firebase-auth.js";
 import {
@@ -25,7 +29,7 @@ import { firebaseConfig } from "./firebase.config.js";
 
 let _app, _auth, _db;
 let _user = null;
-const authReadyResolvers = [];
+const authStateListeners = [];
 
 export function initFirebase() {
   if (_app) return { app: _app, auth: _auth, db: _db };
@@ -39,23 +43,82 @@ export function initFirebase() {
   _db = getDatabase(_app);
 
   onAuthStateChanged(_auth, (user) => {
-    if (user) {
-      _user = user;
-      while (authReadyResolvers.length) authReadyResolvers.shift()(user);
+    _user = user || null;
+    for (const cb of authStateListeners) {
+      try { cb(_user); } catch (e) { console.warn(e); }
     }
-  });
-
-  signInAnonymously(_auth).catch((err) => {
-    console.error("Anonymous sign-in failed:", err);
-    throw err;
   });
 
   return { app: _app, auth: _auth, db: _db };
 }
 
+// Subscribe to auth state changes. Returns an unsubscribe function.
+export function onAuthChange(cb) {
+  authStateListeners.push(cb);
+  // Fire immediately with current state.
+  if (_auth) cb(_user);
+  return () => {
+    const i = authStateListeners.indexOf(cb);
+    if (i >= 0) authStateListeners.splice(i, 1);
+  };
+}
+
+// Wait until we have ANY signed-in user (anonymous or registered).
 export function authReady() {
   if (_user) return Promise.resolve(_user);
-  return new Promise((resolve) => authReadyResolvers.push(resolve));
+  return new Promise((resolve) => {
+    const stop = onAuthChange((u) => {
+      if (u) { stop(); resolve(u); }
+    });
+  });
+}
+
+// Sign in anonymously — used by the "Continue as guest" button.
+export async function signInAsGuest() {
+  if (!_auth) initFirebase();
+  const cred = await signInAnonymously(_auth);
+  return cred.user;
+}
+
+// Sign up a new account.
+export async function signUp({ email, password, displayName }) {
+  if (!_auth) initFirebase();
+  const cred = await createUserWithEmailAndPassword(_auth, email, password);
+  if (displayName) {
+    try { await fbUpdateProfile(cred.user, { displayName }); } catch {}
+  }
+  // Seed a small profile record. Builds live under /users/{uid}/builds.
+  try {
+    await set(ref(_db, `users/${cred.user.uid}/profile`), {
+      displayName: displayName || email.split("@")[0],
+      email,
+      createdAt: serverTimestamp(),
+    });
+  } catch (e) {
+    console.warn("Could not seed profile:", e);
+  }
+  return cred.user;
+}
+
+// Sign in to an existing account.
+export async function signIn({ email, password }) {
+  if (!_auth) initFirebase();
+  const cred = await signInWithEmailAndPassword(_auth, email, password);
+  return cred.user;
+}
+
+export async function signOut() {
+  if (!_auth) return;
+  await fbSignOut(_auth);
+  _user = null;
+}
+
+export function isAnonymous() {
+  return Boolean(_user?.isAnonymous);
+}
+
+export function userDisplayName() {
+  return _user?.displayName || (isAnonymous() ? "Guest" : (_user?.email?.split("@")[0] || "Sorcerer"));
 }
 
 export function currentUid() {
@@ -278,6 +341,58 @@ export async function castVote(roomCode, uid, optionId) {
 
 export async function clearVotes(roomCode) {
   await set(roomRef(roomCode, "votes"), null);
+}
+
+// ─────────────── Saved character builds ───────────────
+// Stored at /users/{uid}/builds/{buildId}. Builds are reusable templates
+// (name + grade + technique + abilities + stats + domain). Pick one when
+// joining a room instead of building from scratch.
+
+function userBuildsRef(uid, sub = "") {
+  return ref(_db, `users/${uid}/builds${sub ? "/" + sub : ""}`);
+}
+
+function newBuildId() {
+  // Short, URL-safe id; collisions extremely unlikely per user.
+  return Date.now().toString(36) + "-" + Math.random().toString(36).slice(2, 8);
+}
+
+export async function saveBuild(uid, build, buildId = null) {
+  if (!uid) throw new Error("Not signed in.");
+  const id = buildId || newBuildId();
+  const record = {
+    ...build,
+    updatedAt: serverTimestamp(),
+    ...(buildId ? {} : { createdAt: serverTimestamp() }),
+  };
+  await set(userBuildsRef(uid, id), record);
+  return id;
+}
+
+export async function listBuilds(uid) {
+  if (!uid) return [];
+  const snap = await get(userBuildsRef(uid));
+  const all = snap.val() || {};
+  return Object.entries(all).map(([id, b]) => ({ id, ...b }));
+}
+
+export async function getBuild(uid, buildId) {
+  const snap = await get(userBuildsRef(uid, buildId));
+  return snap.exists() ? { id: buildId, ...snap.val() } : null;
+}
+
+export async function deleteBuild(uid, buildId) {
+  await set(userBuildsRef(uid, buildId), null);
+}
+
+// Listen for changes to the user's builds list (used by the My Builds view).
+export function listenBuilds(uid, cb) {
+  const r = userBuildsRef(uid);
+  const unsub = onValue(r, (snap) => {
+    const all = snap.val() || {};
+    cb(Object.entries(all).map(([id, b]) => ({ id, ...b })));
+  });
+  return () => off(r, "value", unsub);
 }
 
 export { ref, set, get, update };

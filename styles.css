@@ -934,3 +934,174 @@ button.primary:hover:not(:disabled) {
   .turn-banner-inner { padding: 8px 12px; font-size: 0.85rem; }
   .option-btn { font-size: 0.85rem; padding: 8px 12px; }
 }
+
+/* ──────────────────────────────────────────────────────────────────
+   Auth view
+   ────────────────────────────────────────────────────────────────── */
+.auth-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 14px;
+  background: var(--surface2);
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+}
+.auth-tab {
+  flex: 1;
+  margin: 0;
+  padding: 8px 10px;
+  text-align: center;
+  font-size: 0.85rem;
+  font-weight: 500;
+  color: var(--muted);
+  cursor: pointer;
+  border-radius: 6px;
+  transition: background 0.15s, color 0.15s;
+}
+.auth-tab input { display: none; }
+.auth-tab:has(input:checked) {
+  background: var(--accent);
+  color: white;
+  box-shadow: 0 0 12px var(--accent-glow);
+}
+.auth-panel { text-align: left; }
+.auth-panel input { margin-top: 4px; }
+.auth-panel.hidden { display: none; }
+
+/* ──────────────────────────────────────────────────────────────────
+   Lobby account row
+   ────────────────────────────────────────────────────────────────── */
+.lobby-account-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  font-size: 0.85rem;
+}
+.lobby-account-info { color: var(--muted); }
+.lobby-account-info strong { color: var(--text); }
+.lobby-account-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.lobby-account-actions button { width: auto; margin: 0; }
+
+/* ──────────────────────────────────────────────────────────────────
+   My Builds view
+   ────────────────────────────────────────────────────────────────── */
+.builds-card { max-width: 720px; }
+.builds-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+}
+.builds-header-actions { display: flex; gap: 6px; }
+.builds-header-actions button { width: auto; margin: 0; }
+.builds-list { display: flex; flex-direction: column; gap: 10px; }
+
+.build-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 12px 14px;
+  transition: border-color var(--transition);
+}
+.build-card:hover { border-color: var(--border-hi); }
+.build-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+.build-card-name { font-weight: 600; font-size: 1.05rem; color: var(--accent2); }
+.build-card-grade {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  background: var(--surface3);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+.build-card-technique { color: var(--muted2); font-size: 0.85rem; margin: 4px 0; }
+.build-card-abilities { color: var(--accent2); font-size: 0.78rem; font-style: italic; margin: 2px 0; }
+.build-card-stats { color: var(--muted); font-size: 0.74rem; margin: 2px 0; }
+.build-card-actions {
+  display: flex; gap: 6px; margin-top: 8px;
+  border-top: 1px dashed var(--border);
+  padding-top: 8px;
+}
+.build-card-actions button { width: auto; margin: 0; }
+.build-card-actions .btn-delete:hover {
+  background: var(--danger);
+  color: white;
+  border-color: var(--danger);
+}
+
+/* ──────────────────────────────────────────────────────────────────
+   Build editor: ability preview
+   ────────────────────────────────────────────────────────────────── */
+.build-preview {
+  background: rgba(138, 92, 255, 0.05);
+  border: 1px solid rgba(138, 92, 255, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  margin-top: 10px;
+}
+.build-preview h2 { font-size: 0.95rem; margin-bottom: 6px; }
+.builds-ability-list { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.builds-ability-row {
+  background: var(--surface);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 0.86rem;
+}
+.builds-ability-name { color: var(--accent2); font-weight: 600; margin-right: 8px; }
+.builds-ability-cost {
+  font-size: 0.72rem;
+  background: var(--surface3);
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: var(--muted);
+}
+.builds-ability-effect { display: block; margin-top: 2px; }
+
+.build-editor-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+}
+.build-editor-actions button { flex: 1; margin: 0; }
+
+/* ──────────────────────────────────────────────────────────────────
+   Saved-builds picker on the character creation view
+   ────────────────────────────────────────────────────────────────── */
+.saved-build-panel {
+  background: rgba(94, 224, 166, 0.05);
+  border: 1px solid rgba(94, 224, 166, 0.2);
+  border-radius: 8px;
+  padding: 12px;
+  margin-bottom: 14px;
+}
+.saved-build-panel h2.small { font-size: 0.85rem; margin-bottom: 6px; color: var(--good); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 600; }
+.saved-build-list { display: flex; flex-direction: column; gap: 6px; }
+.saved-build-card {
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: left;
+  width: 100%;
+  margin: 0;
+  cursor: pointer;
+  transition: all var(--transition);
+}
+.saved-build-card:hover {
+  border-color: var(--good);
+  background: rgba(94, 224, 166, 0.08);
+  transform: translateX(2px);
+}
+.saved-build-title { display: flex; justify-content: space-between; align-items: baseline; }
+.saved-build-name { font-weight: 600; color: var(--text); }
+.saved-build-grade { font-size: 0.72rem; color: var(--muted); }
+.saved-build-tech { margin-top: 2px; }

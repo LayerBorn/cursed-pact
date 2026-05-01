@@ -6,10 +6,12 @@ import {
   generateRoomCode,
   roomExists,
   createRoom,
+  isAnonymous,
+  userDisplayName,
 } from "../firebase.js";
 import { hostHasDmProvider } from "../gemini.js";
 
-export function initLobby({ onJoin }) {
+export function initLobby({ onJoin, onMyBuilds, onSignOut }) {
   $("#btn-create").addEventListener("click", async () => {
     if (!hostHasDmProvider()) {
       toast("Hosts need a DM provider — pick Gemini key or Ollama.", "warn");
@@ -59,9 +61,28 @@ export function initLobby({ onJoin }) {
     window.__app.returnViewAfterKey = "view-lobby";
     show("view-key");
   });
+
+  $("#btn-my-builds").addEventListener("click", () => {
+    if (isAnonymous()) {
+      toast("Sign up to save builds across sessions.", "warn");
+      return;
+    }
+    onMyBuilds && onMyBuilds();
+  });
+
+  $("#btn-sign-out").addEventListener("click", () => {
+    onSignOut && onSignOut();
+  });
 }
 
-export function setLobbyUid(uid) {
-  const node = document.getElementById("lobby-uid");
-  if (node) node.textContent = uid ? uid.slice(0, 8) : "—";
+export function setLobbyUid(_uid) {
+  // Refresh the visible account row.
+  const nameEl = document.getElementById("lobby-display-name");
+  const badge = document.getElementById("lobby-uid-badge");
+  const myBuildsBtn = document.getElementById("btn-my-builds");
+  const anonHint = document.getElementById("lobby-anon-hint");
+  if (nameEl) nameEl.textContent = userDisplayName();
+  if (badge) badge.textContent = isAnonymous() ? "(guest)" : "";
+  if (myBuildsBtn) myBuildsBtn.disabled = isAnonymous();
+  if (anonHint) anonHint.classList.toggle("hidden", !isAnonymous());
 }
