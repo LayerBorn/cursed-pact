@@ -6,9 +6,8 @@ import {
   generateRoomCode,
   roomExists,
   createRoom,
-  isAnonymous,
-  userDisplayName,
 } from "../firebase.js";
+import { cpIsSignedIn, cpUser } from "../cpApi.js";
 import { hostHasDmProvider } from "../gemini.js";
 
 export function initLobby({ onJoin, onMyBuilds, onSignOut }) {
@@ -63,7 +62,7 @@ export function initLobby({ onJoin, onMyBuilds, onSignOut }) {
   });
 
   $("#btn-my-builds").addEventListener("click", () => {
-    if (isAnonymous()) {
+    if (!cpIsSignedIn()) {
       toast("Sign up to save builds across sessions.", "warn");
       return;
     }
@@ -76,13 +75,15 @@ export function initLobby({ onJoin, onMyBuilds, onSignOut }) {
 }
 
 export function setLobbyUid(_uid) {
-  // Refresh the visible account row.
   const nameEl = document.getElementById("lobby-display-name");
   const badge = document.getElementById("lobby-uid-badge");
   const myBuildsBtn = document.getElementById("btn-my-builds");
   const anonHint = document.getElementById("lobby-anon-hint");
-  if (nameEl) nameEl.textContent = userDisplayName();
-  if (badge) badge.textContent = isAnonymous() ? "(guest)" : "";
-  if (myBuildsBtn) myBuildsBtn.disabled = isAnonymous();
-  if (anonHint) anonHint.classList.toggle("hidden", !isAnonymous());
+  const guest = !cpIsSignedIn();
+  const u = cpUser();
+  const display = u?.displayName || u?.email?.split("@")[0] || "Guest";
+  if (nameEl) nameEl.textContent = display;
+  if (badge) badge.textContent = guest ? "(guest)" : "";
+  if (myBuildsBtn) myBuildsBtn.disabled = guest;
+  if (anonHint) anonHint.classList.toggle("hidden", !guest);
 }

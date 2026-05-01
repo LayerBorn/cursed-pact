@@ -1,14 +1,8 @@
 import { $, show, toast } from "./common.js";
-import {
-  initFirebase,
-  signIn,
-  signUp,
-  signInAsGuest,
-  signOut,
-} from "../firebase.js";
+import { cpSignIn, cpSignUp, cpSignOut } from "../cpApi.js";
+import { signInAsGuest, initFirebase } from "../firebase.js";
 
 export function initAuth({ onSignedIn }) {
-  // Tab switching
   document.querySelectorAll('input[name="auth-mode"]').forEach((r) => {
     r.addEventListener("change", () => {
       const mode = (document.querySelector('input[name="auth-mode"]:checked') || {}).value || "signin";
@@ -22,12 +16,13 @@ export function initAuth({ onSignedIn }) {
     const password = $("#signin-password").value || "";
     if (!email || !password) { toast("Email and password required.", "warn"); return; }
     try {
-      initFirebase();
-      await signIn({ email, password });
+      await cpSignIn({ email, password });
+      // Also sign into Firebase anonymously so the user can join multiplayer rooms.
+      try { initFirebase(); await signInAsGuest(); } catch (e) { console.warn("Anon Firebase failed:", e); }
       onSignedIn();
     } catch (err) {
       console.error(err);
-      $("#auth-status").textContent = friendlyAuthError(err);
+      $("#auth-status").textContent = err.message || "Sign-in failed.";
     }
   });
 
@@ -38,12 +33,12 @@ export function initAuth({ onSignedIn }) {
     if (!email || !password) { toast("Email and password required.", "warn"); return; }
     if (password.length < 6) { toast("Password must be at least 6 characters.", "warn"); return; }
     try {
-      initFirebase();
-      await signUp({ email, password, displayName });
+      await cpSignUp({ email, password, displayName });
+      try { initFirebase(); await signInAsGuest(); } catch (e) { console.warn("Anon Firebase failed:", e); }
       onSignedIn();
     } catch (err) {
       console.error(err);
-      $("#auth-status").textContent = friendlyAuthError(err);
+      $("#auth-status").textContent = err.message || "Sign-up failed.";
     }
   });
 
@@ -54,11 +49,10 @@ export function initAuth({ onSignedIn }) {
       onSignedIn();
     } catch (err) {
       console.error(err);
-      $("#auth-status").textContent = friendlyAuthError(err);
+      $("#auth-status").textContent = err.message || "Guest sign-in failed.";
     }
   });
 
-  // Enter key submits the active panel
   $("#signin-password").addEventListener("keydown", (e) => {
     if (e.key === "Enter") $("#btn-signin").click();
   });
@@ -67,23 +61,7 @@ export function initAuth({ onSignedIn }) {
   });
 }
 
-function friendlyAuthError(err) {
-  const code = err?.code || "";
-  switch (code) {
-    case "auth/invalid-email": return "That email doesn't look right.";
-    case "auth/email-already-in-use": return "An account already exists for that email. Try signing in.";
-    case "auth/weak-password": return "Password too short — use at least 6 characters.";
-    case "auth/user-not-found":
-    case "auth/wrong-password":
-    case "auth/invalid-credential":
-      return "Email or password incorrect.";
-    case "auth/operation-not-allowed":
-      return "Email/password sign-in isn't enabled in Firebase. Host needs to enable it.";
-    case "auth/network-request-failed": return "Network error — try again.";
-    default: return err?.message || "Sign-in failed.";
-  }
-}
-
 export async function doSignOut() {
-  try { await signOut(); } catch {}
+  try { await cpSignOut(); } catch {}
+  // Don't sign out of Firebase — guest auth is needed for multiplayer.
 }

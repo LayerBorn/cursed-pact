@@ -1,19 +1,19 @@
 import { $, show, toast, el, escapeHtml } from "./common.js";
 import {
-  currentUid,
-  isAnonymous,
-  listenBuilds,
-  getBuild,
-  saveBuild,
-  deleteBuild,
-} from "../firebase.js";
+  cpIsSignedIn,
+  cpListBuilds,
+  cpGetBuild,
+  cpSaveBuild,
+  cpDeleteBuild,
+  onCpAuthChange,
+} from "../cpApi.js";
 import { STARTER_TECHNIQUES, buildCharacter } from "../game/character.js";
 import { generateAbilities, hostHasDmProvider } from "../gemini.js";
 import { findProfanity } from "../util/profanity.js";
 
-let unsubscribeBuilds = null;
 let editingBuildId = null;
 let editingPreview = null; // { stats, abilities } before save
+let unsubscribeBuilds = null;
 
 // ──────────────────────────────────────────────────────────────────
 // MY BUILDS LIST
@@ -23,21 +23,34 @@ export function initBuilds({ onBack, onEdit, onCreate }) {
   $("#btn-builds-new").addEventListener("click", onCreate);
 }
 
-export function showBuildsList() {
-  if (isAnonymous()) {
+export async function showBuildsList() {
+  if (!cpIsSignedIn()) {
     toast("Sign up for a free account to save builds across rooms.", "warn");
     return false;
   }
-  if (unsubscribeBuilds) { try { unsubscribeBuilds(); } catch {} unsubscribeBuilds = null; }
-  unsubscribeBuilds = listenBuilds(currentUid(), (builds) => {
-    renderBuildsList(builds);
-  });
   show("view-builds");
+  await refreshBuildsList();
+  // Re-fetch when auth state changes (sign out etc.)
+  if (unsubscribeBuilds) { try { unsubscribeBuilds(); } catch {} unsubscribeBuilds = null; }
+  unsubscribeBuilds = onCpAuthChange((u) => {
+    if (!u) renderBuildsList([]);
+    else refreshBuildsList().catch(() => {});
+  });
   return true;
 }
 
 export function leaveBuildsList() {
   if (unsubscribeBuilds) { try { unsubscribeBuilds(); } catch {} unsubscribeBuilds = null; }
+}
+
+async function refreshBuildsList() {
+  try {
+    const builds = await cpListBuilds();
+    renderBuildsList(builds);
+  } catch (err) {
+    console.error(err);
+    toast(`Couldn't load builds: ${err.message}`, "error");
+  }
 }
 
 function renderBuildsList(builds) {
@@ -79,8 +92,9 @@ function renderBuildsList(builds) {
       class: "ghost small",
       onclick: async () => {
         try {
-          const newId = await saveBuild(currentUid(), { ...b, name: `${b.name} (copy)`, createdAt: undefined, updatedAt: undefined });
+          await cpSaveBuild({ ...b, id: undefined, name: `${b.name} (copy)`, createdAt: undefined, updatedAt: undefined });
           toast("Duplicated.", "ok");
+          await refreshBuildsList();
         } catch (err) {
           toast(`Duplicate failed: ${err.message}`, "error");
         }
@@ -91,8 +105,9 @@ function renderBuildsList(builds) {
       onclick: async () => {
         if (!confirm(`Delete "${b.name}"? This can't be undone.`)) return;
         try {
-          await deleteBuild(currentUid(), b.id);
+          await cpDeleteBuild(b.id);
           toast("Deleted.", "ok");
+          await refreshBuildsList();
         } catch (err) {
           toast(`Delete failed: ${err.message}`, "error");
         }
@@ -188,9 +203,9 @@ export function initBuildEditor({ onSaved, onCancel }) {
     };
 
     try {
-      const id = await saveBuild(currentUid(), saved, editingBuildId);
+      const result = await cpSaveBuild(saved, editingBuildId);
       toast(editingBuildId ? "Saved." : "Build created.", "ok");
-      onSaved(id);
+      onSaved(result?.id || editingBuildId);
     } catch (err) {
       console.error(err);
       $("#build-editor-status").textContent = `Save failed: ${err.message}`;
@@ -211,7 +226,7 @@ export async function openBuildEditor({ buildId } = {}) {
 
   if (buildId) {
     try {
-      const b = await getBuild(currentUid(), buildId);
+      const b = await cpGetBuild(buildId);
       if (b) {
         $("#build-name").value = b.name || "";
         $("#build-grade").value = b.grade || "Grade 3";

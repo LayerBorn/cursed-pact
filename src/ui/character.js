@@ -1,6 +1,7 @@
 import { $, show, toast, el, escapeHtml } from "./common.js";
 import { STARTER_TECHNIQUES, buildCharacter } from "../game/character.js";
-import { addPlayer, currentUid, listenRoom, isAnonymous, listBuilds } from "../firebase.js";
+import { addPlayer, currentUid, listenRoom } from "../firebase.js";
+import { cpIsSignedIn, cpListBuilds } from "../cpApi.js";
 import { generateAbilities, hostHasDmProvider } from "../gemini.js";
 import { findProfanity } from "../util/profanity.js";
 
@@ -221,14 +222,14 @@ async function renderSavedBuilds() {
   const empty = document.getElementById("saved-build-empty");
   if (!panel || !list || !empty) return;
 
-  // Anonymous users have no builds.
-  if (isAnonymous() || !currentUid()) {
+  // Guests (not signed in to a CP account) have no builds.
+  if (!cpIsSignedIn()) {
     panel.classList.add("hidden");
     return;
   }
 
   let builds = [];
-  try { builds = await listBuilds(currentUid()); } catch { builds = []; }
+  try { builds = await cpListBuilds(); } catch { builds = []; }
   const lockedGrade = savedBuildsRoomGrade;
   const matching = lockedGrade
     ? builds.filter((b) => b.grade === lockedGrade)

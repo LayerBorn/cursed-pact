@@ -6,8 +6,9 @@ import { initGame, joinRoom } from "./ui/game.js";
 import { initAuth, doSignOut } from "./ui/auth.js";
 import { initBuilds, showBuildsList, leaveBuildsList, initBuildEditor, openBuildEditor } from "./ui/builds.js";
 import {
-  initFirebase, authReady, currentUid, onAuthChange, isAnonymous, userDisplayName,
+  initFirebase, authReady, currentUid, onAuthChange, signInAsGuest,
 } from "./firebase.js";
+import { cpIsSignedIn, cpRefreshMe, onCpAuthChange } from "./cpApi.js";
 import {
   loadStoredKey, saveKey, clearKey,
   loadStoredProvider, saveProvider,
@@ -192,15 +193,33 @@ window.addEventListener("DOMContentLoaded", async () => {
     return;
   }
 
-  // Route based on auth state.
-  onAuthChange((user) => {
-    if (user) {
+  // If a stored CP token is present from a prior visit, validate it before
+  // routing to the lobby. Failure clears the token and falls through.
+  if (cpIsSignedIn()) {
+    cpRefreshMe().catch(() => {});
+  }
+
+  // Routing rule: any signed-in user (CP account OR Firebase guest) ⇒ lobby.
+  // No signed-in user ⇒ auth view.
+  function route() {
+    const hasCpAccount = cpIsSignedIn();
+    const hasGuest = Boolean(currentUid());
+    if (hasCpAccount || hasGuest) {
       setLobbyUid(currentUid());
-      // Only auto-route to lobby if we're still on the auth view.
       const onAuth = document.getElementById("view-auth").classList.contains("active");
       if (onAuth) show("view-lobby");
     } else {
       show("view-auth");
     }
-  });
+  }
+
+  onAuthChange(route);
+  onCpAuthChange(route);
+
+  // If we have a CP account token but no Firebase guest session yet, sign in
+  // anonymously so multiplayer rooms work. Firebase Auth fires onAuthChange
+  // when the anon session lands and route() picks up.
+  if (cpIsSignedIn() && !currentUid()) {
+    try { await signInAsGuest(); } catch (e) { console.warn("Anon Firebase failed:", e); }
+  }
 });
