@@ -17,6 +17,12 @@ dist/
 .cache/
 .parcel-cache/
 
+# Firebase CLI cache + downloaded service-account JSONs (never commit these)
+.firebase/
+firebase-debug.log
+**/firebase-adminsdk-*.json
+**/*-firebase-adminsdk-*.json
+
 # OS / editor
 .DS_Store
 Thumbs.db
